@@ -64,16 +64,61 @@
 Hanlyang_Stock_MA/
 ├── README.md                                    # 프로젝트 소개
 ├── Moving_Average_Investment_Strategy_Summary.md # 전략 상세 문서
+├── .gitignore                                   # Git 제외 설정
+├── pyproject.toml                               # 프로젝트 설정
+│
 ├── src/                                         # 소스 코드
-│   ├── data/                                    # 데이터 수집 모듈
-│   ├── indicators/                              # 기술적 지표 계산
 │   ├── strategy/                                # 매매 전략 로직
+│   │   └── __init__.py
 │   ├── backtest/                                # 백테스팅 엔진
-│   └── trading/                                 # 실거래 연동
-├── tests/                                       # 테스트 코드
-├── config/                                      # 설정 파일
-└── docs/                                        # 추가 문서
+│   │   └── __init__.py
+│   ├── analysis/                                # 시장 분석
+│   │   ├── __init__.py
+│   │   └── technical/                           # 기술적 분석 전략
+│   │       └── __init__.py                      # (이동평균선, RSI 등)
+│   ├── config/                                  # 설정 관리
+│   │   └── __init__.py                          # (YAML 기반)
+│   └── utils/                                   # 유틸리티
+│       ├── __init__.py
+│       ├── koreainvestment/                     # 한국투자증권 API
+│       │   └── __init__.py
+│       └── slack/                               # Slack 알림
+│           └── __init__.py
+│
+├── data/                                        # JSON 데이터 저장소
+│   └── README.md
+│
+├── history/                                     # 개발 이력 관리
+│   ├── README.md
+│   └── 2025-10-14_project_setup.md
+│
+└── log/                                         # 실행 로그
+    └── README.md
 ```
+
+### 구조 설명
+
+#### **src/** - 소스 코드
+- **strategy/**: 매매 전략 로직 구현
+- **backtest/**: 백테스팅 엔진 및 성과 분석
+- **analysis/technical/**: 기술적 분석 전략 모듈 (확장 가능한 구조)
+- **config/**: YAML 기반 설정 관리
+- **utils/**: 유틸리티 기능
+  - **koreainvestment/**: 한국투자증권 API 연동
+  - **slack/**: Slack 알림 기능
+  - 파일 입출력 등 공통 기능
+
+#### **data/** - 데이터 저장소
+- JSON 파일 형태로 데이터 관리 (DB 미사용)
+- 주가, 지표, 신호, 포지션 등
+
+#### **history/** - 개발 이력
+- 날짜별 개발 기록 (마크다운)
+- 이슈 및 해결 방법 기록
+
+#### **log/** - 실행 로그
+- 백테스팅 결과 로그
+- Crontab 실행 로그
 
 ## 🚀 시작하기
 
