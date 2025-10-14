@@ -1,0 +1,86 @@
+# Python 가상환경
+.venv/
+venv/
+ENV/
+env/
+
+# Python 캐시 및 컴파일 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 배포 관련
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# 테스트 관련
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# 환경 변수 파일
+.env
+.env.local
+.env.*.local
+
+# IDE 설정 파일
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 로그 파일
+*.log
+
+# 데이터베이스
+*.db
+*.sqlite
+*.sqlite3
+
+# 백테스팅 결과 및 데이터
+data/raw/*
+data/processed/*
+results/
+backtest_results/
+*.csv
+*.xlsx
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# API 키 및 설정
+config/secrets.yaml
+config/api_keys.json
+*.key
+
+# 임시 파일
+*.tmp
+*.bak
+*.swp
