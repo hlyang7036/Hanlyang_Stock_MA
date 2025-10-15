@@ -1,13 +1,19 @@
 """
-Config 패키지
+설정 관리 모듈
 
-전략 실행에 필요한 설정 및 변수를 관리하는 패키지입니다.
-YAML 파일을 통해 설정값을 로드하고 관리합니다.
-
-설정 항목:
-- 이동평균선 기간 설정 (5일, 20일, 40일)
-- MACD 매개변수 설정
-- 리스크 관리 설정 (유닛, ATR, 손절 기준)
-- 백테스팅 설정
-- API 연동 설정
+환경변수 기반 설정 로드 및 API 인증 정보 관리
 """
+
+from .config_loader import (
+    ConfigLoader,
+    get_config_loader,
+    load_config,
+    get_api_credentials
+)
+
+__all__ = [
+    'ConfigLoader',
+    'get_config_loader',
+    'load_config',
+    'get_api_credentials',
+]
