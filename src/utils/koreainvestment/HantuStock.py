@@ -480,3 +480,253 @@ class HantuStock:
         else:
             print(order_result['msg1'])
             return None, 0
+
+    # =====================================================================
+    # 추가 기능 - 실시간 및 날짜 지정 데이터 조회
+    # =====================================================================
+    
+    def get_current_price(self, ticker):
+        """
+        실시간 현재가 조회 (다양한 방법 시도)
+        
+        Args:
+            ticker (str): 종목 코드
+            
+        Returns:
+            dict: 현재가 정보 {
+                'current_price': 현재가,
+                'prev_close': 전일종가,
+                'open': 시가,
+                'high': 고가,
+                'low': 저가,
+                'volume': 거래량,
+                'change_rate': 등락률,
+                'timestamp': 시간
+            } or None (실패시)
+        """
+        try:
+            # 방법 1: 기존 get_past_data 활용 (가장 안정적)
+            try:
+                data = self.get_past_data(ticker, n=1)
+                
+                if isinstance(data, pd.Series):
+                    # Series인 경우
+                    return {
+                        'current_price': float(data.get('close', 0)),
+                        'prev_close': float(data.get('close', 0)),  # 당일 종가로 대체
+                        'open': float(data.get('open', 0)),
+                        'high': float(data.get('high', 0)),
+                        'low': float(data.get('low', 0)),
+                        'volume': int(data.get('volume', 0)),
+                        'change_rate': float(data.get('change', 0)) if 'change' in data else 0.0,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                elif isinstance(data, pd.DataFrame) and not data.empty:
+                    # DataFrame인 경우
+                    row = data.iloc[-1]
+                    return {
+                        'current_price': float(row.get('close', 0)),
+                        'prev_close': float(row.get('close', 0)),  # 당일 종가로 대체
+                        'open': float(row.get('open', 0)),
+                        'high': float(row.get('high', 0)),
+                        'low': float(row.get('low', 0)),
+                        'volume': int(row.get('volume', 0)),
+                        'change_rate': float(row.get('change', 0)) if 'change' in row else 0.0,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+            except Exception as e:
+                print(f"⚠️ get_past_data 방식 실패: {e}")
+            
+            # 방법 2: pykrx로 당일 데이터 조회
+            try:
+                today = datetime.now().strftime('%Y%m%d')
+                
+                # KOSPI 시도
+                try:
+                    data = pystock.get_market_ohlcv_by_ticker(today, market='KOSPI')
+                    if ticker in data.index:
+                        row = data.loc[ticker]
+                        return {
+                            'current_price': float(row['종가']),
+                            'prev_close': float(row['종가']),  # 전일 종가는 별도 조회 필요
+                            'open': float(row['시가']),
+                            'high': float(row['고가']),
+                            'low': float(row['저가']),
+                            'volume': int(row['거래량']),
+                            'change_rate': float(row['등락률']),
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        }
+                except:
+                    pass
+                
+                # KOSDAQ 시도
+                try:
+                    data = pystock.get_market_ohlcv_by_ticker(today, market='KOSDAQ')
+                    if ticker in data.index:
+                        row = data.loc[ticker]
+                        return {
+                            'current_price': float(row['종가']),
+                            'prev_close': float(row['종가']),
+                            'open': float(row['시가']),
+                            'high': float(row['고가']),
+                            'low': float(row['저가']),
+                            'volume': int(row['거래량']),
+                            'change_rate': float(row['등락률']),
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        }
+                except:
+                    pass
+                    
+            except Exception as e:
+                print(f"⚠️ pykrx 방식 실패: {e}")
+            
+            print(f"❌ {ticker}: 모든 방식으로 현재가 조회 실패")
+            return None
+                
+        except Exception as e:
+            print(f"❌ {ticker} 현재가 조회 오류: {e}")
+            return None
+    
+    def get_past_data_by_date(self, ticker, start_date, end_date=None):
+        """
+        날짜 지정 과거 데이터 조회 (pykrx 우선 사용)
+        
+        Args:
+            ticker (str): 종목 코드
+            start_date (str): 시작일 (YYYYMMDD 또는 YYYY-MM-DD)
+            end_date (str, optional): 종료일. None이면 오늘까지
+            
+        Returns:
+            DataFrame: 지정된 기간의 일봉 데이터 or 빈 DataFrame (실패시)
+        """
+        try:
+            # 날짜 형식 변환
+            if '-' in str(start_date):
+                start_date = start_date.replace('-', '')
+            if end_date and '-' in str(end_date):
+                end_date = end_date.replace('-', '')
+            elif end_date is None:
+                end_date = datetime.now().strftime('%Y%m%d')
+            
+            # 방법 1: pykrx 사용 (모의투자에서도 안정적)
+            # KOSPI 시도
+            try:
+                data = pystock.get_market_ohlcv(start_date, end_date, ticker, market='KOSPI')
+                if not data.empty:
+                    data = self._standardize_pykrx_data(data)
+                    return data
+            except:
+                pass
+                
+            # KOSDAQ 시도
+            try:
+                data = pystock.get_market_ohlcv(start_date, end_date, ticker, market='KOSDAQ')
+                if not data.empty:
+                    data = self._standardize_pykrx_data(data)
+                    return data
+            except:
+                pass
+            
+            # 방법 2: FinanceDataReader 사용
+            try:
+                # 전체 데이터 받아서 기간 필터링
+                data = fdr.DataReader(ticker)
+                if not data.empty:
+                    data.columns = [col.lower() for col in data.columns]
+                    data.index.name = 'timestamp'
+                    data = data.reset_index()
+                    data['timestamp'] = pd.to_datetime(data['timestamp'])
+                    
+                    # 날짜 형식 변환
+                    start_dt = pd.to_datetime(start_date, format='%Y%m%d')
+                    end_dt = pd.to_datetime(end_date, format='%Y%m%d')
+                    
+                    # 기간 필터링
+                    mask = (data['timestamp'] >= start_dt) & (data['timestamp'] <= end_dt)
+                    data = data[mask].copy()
+                    
+                    if not data.empty:
+                        return data
+            except Exception as e:
+                print(f"⚠️ FinanceDataReader 조회 실패: {e}")
+                
+            print(f"❌ {ticker}: 날짜별 데이터 조회 실패 ({start_date} ~ {end_date})")
+            return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"❌ {ticker} 날짜별 데이터 조회 오류: {e}")
+            return pd.DataFrame()
+
+    
+    def get_market_data_by_date(self, date_str):
+        """
+        특정 날짜의 전체 시장 데이터 조회
+        
+        Args:
+            date_str (str): 날짜 (YYYY-MM-DD 또는 YYYYMMDD)
+            
+        Returns:
+            DataFrame: 해당 날짜의 전체 시장 데이터
+        """
+        try:
+            # 날짜 형식 통일
+            if '-' in str(date_str):
+                pykrx_date = date_str.replace('-', '')
+            else:
+                pykrx_date = date_str
+                
+            # KOSPI + KOSDAQ 데이터 조회
+            kospi_data = pystock.get_market_ohlcv(pykrx_date, market='KOSPI')
+            kosdaq_data = pystock.get_market_ohlcv(pykrx_date, market='KOSDAQ')
+            
+            # 데이터 병합
+            all_data = pd.concat([kospi_data, kosdaq_data])
+            
+            if all_data.empty or all_data['거래대금'].sum() == 0:
+                print(f"⚠️ {date_str}: 휴장일이거나 데이터 없음")
+                return pd.DataFrame()
+            
+            # 표준화
+            all_data = self._standardize_pykrx_data(all_data)
+            all_data['timestamp'] = pd.to_datetime(date_str)
+            all_data.index.name = 'ticker'
+            all_data = all_data.reset_index()
+            
+            # 거래가 없었던 종목 처리
+            all_data['open'] = all_data['open'].where(all_data['open'] > 0, all_data['close'])
+            all_data['high'] = all_data['high'].where(all_data['high'] > 0, all_data['close'])
+            all_data['low'] = all_data['low'].where(all_data['low'] > 0, all_data['close'])
+            
+            return all_data
+            
+        except Exception as e:
+            print(f"❌ {date_str} 시장 데이터 조회 오류: {e}")
+            return pd.DataFrame()
+    
+    def _standardize_pykrx_data(self, data):
+        """
+        pykrx 데이터 표준화
+        
+        Args:
+            data (DataFrame): pykrx 원본 데이터
+            
+        Returns:
+            DataFrame: 표준화된 데이터
+        """
+        column_mapping = {
+            '시가': 'open',
+            '고가': 'high',
+            '저가': 'low',
+            '종가': 'close',
+            '거래량': 'volume',
+            '거래대금': 'trade_amount',
+            '등락률': 'change_rate',
+            '시가총액': 'market_cap'
+        }
+        
+        data = data.rename(columns=column_mapping)
+        data.index.name = 'timestamp'
+        data = data.reset_index()
+        data['timestamp'] = pd.to_datetime(data['timestamp'])
+        
+        return data
