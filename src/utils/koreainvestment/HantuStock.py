@@ -133,24 +133,31 @@ class HantuStock:
             'remaining_time': max(0, remaining_time)
         }
                 
-    def get_header(self, tr_id_suffix):
+    def get_header(self, tr_id, add_prefix=True):
         """
         API 요청 헤더 생성
         
         Args:
-            tr_id_suffix (str): TR ID 접미사
+            tr_id (str): TR ID 또는 TR ID suffix
+            add_prefix (bool): 모드에 따라 T/V prefix 추가 여부
+                - True: 모드별 prefix 추가 (주문/계좌 API용, 예: TTC0802U → TTTC0802U)
+                - False: TR ID 그대로 사용 (시세 조회 API용, 예: FHKST01010100)
             
         Returns:
             dict: 요청 헤더
         """
-        # TR ID를 모드에 따라 동적으로 생성 (V/T + suffix)
-        tr_id = f"{self._tr_prefix}{tr_id_suffix}"
+        # prefix 추가 여부에 따라 TR ID 결정
+        if add_prefix:
+            final_tr_id = f"{self._tr_prefix}{tr_id}"
+        else:
+            final_tr_id = tr_id
+        
         headers = {
             "content-type": "application/json",
             "appkey": self._api_key, 
             "appsecret": self._secret_key,
             "authorization": f"Bearer {self._access_token}",
-            "tr_id": tr_id,
+            "tr_id": final_tr_id,
         }
         return headers
 
@@ -198,6 +205,97 @@ class HantuStock:
     # =====================================================================
     # 시장 데이터 조회
     # =====================================================================
+    
+    def inquire_price(self, ticker):
+        """
+        특정 종목의 현재가 조회
+        
+        Args:
+            ticker (str): 종목 코드
+            
+        Returns:
+            float: 현재가
+        """
+        try:
+            headers = self.get_header('FHKST01010100', add_prefix=False)  # 국내주식 기본시세 조회
+            params = {
+                "fid_cond_mrkt_div_code": "J",
+                "fid_input_iscd": ticker
+            }
+            
+            url = self._base_url + '/uapi/domestic-stock/v1/quotations/inquire-price'
+            hd, res = self._requests(url, headers, params)
+            
+            if res['rt_cd'] == '0':
+                current_price = float(res['output']['stck_prpr'])
+                return current_price
+            else:
+                print(f"현재가 조회 실패: {res['msg1']}")
+                return None
+                
+        except Exception as e:
+            print(f"현재가 조회 중 오류 발생: {e}")
+            return None
+    
+    def inquire_daily_price(self, ticker, start_date=None, end_date=None, adj_price=True):
+        """
+        특정 종목의 일봉 데이터 조회
+        
+        Args:
+            ticker (str): 종목 코드
+            start_date (str, optional): 시작일 (YYYYMMDD). None이면 최근 100일
+            end_date (str, optional): 종료일 (YYYYMMDD). None이면 오늘
+            adj_price (bool): 수정주가 여부
+            
+        Returns:
+            DataFrame: 일봉 데이터
+        """
+        try:
+            if end_date is None:
+                end_date = datetime.now().strftime('%Y%m%d')
+            
+            if start_date is None:
+                # 최근 100일 (주말 포함하여 150일 전부터)
+                start_date = (datetime.now() - timedelta(days=150)).strftime('%Y%m%d')
+            
+            headers = self.get_header('FHKST03010100', add_prefix=False)  # 국내주식 기간별 시세 조회
+            params = {
+                "fid_cond_mrkt_div_code": "J",
+                "fid_input_iscd": ticker,
+                "fid_input_date_1": start_date,
+                "fid_input_date_2": end_date,
+                "fid_period_div_code": "D",  # D: 일봉
+                "fid_org_adj_prc": "0" if adj_price else "1"  # 0: 수정주가, 1: 원주가
+            }
+            
+            url = self._base_url + '/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice'
+            hd, res = self._requests(url, headers, params)
+            
+            if res['rt_cd'] == '0' and res['output2']:
+                df = pd.DataFrame(res['output2'])
+                print(f'df.columns: {df.columns}')
+                # 날짜를 인덱스로 설정
+                df['stck_bsop_date'] = pd.to_datetime(df['stck_bsop_date'])
+                df = df.set_index('stck_bsop_date')
+                df.index.name = 'Date'
+                
+                # 데이터 타입 변환
+                numeric_columns = ['stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_clpr', 'acml_vol']
+                for col in numeric_columns:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # 날짜 역순 정렬 (과거 -> 최근)
+                df = df.sort_index()
+                
+                return df
+            else:
+                print(f"일봉 데이터 조회 실패: {res['msg1']}")
+                return None
+                
+        except Exception as e:
+            print(f"일봉 데이터 조회 중 오류 발생: {e}")
+            return None
     
     def get_past_data(self, ticker, n=100):
         """
