@@ -267,10 +267,209 @@ def calculate_atr(
         logger.error(f"ATR 계산 중 오류 발생: {e}")
         raise
 
+
+def calculate_macd(
+        data: Union[pd.Series, pd.DataFrame],
+        fast: int = 12,
+        slow: int = 26,
+        signal: int = 9,
+        column: str = 'Close'
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    MACD (Moving Average Convergence Divergence) 계산
+
+    MACD는 두 개의 EMA 차이를 통해 추세의 방향과 강도를 파악하는 지표입니다.
+
+    계산식:
+        1. MACD선 = 단기 EMA - 장기 EMA
+        2. 시그널선 = MACD의 signal일 EMA
+        3. 히스토그램 = MACD - 시그널
+
+    Args:
+        data (pd.Series | pd.DataFrame): 가격 데이터
+        fast (int): 단기 EMA 기간 (기본값: 12)
+        slow (int): 장기 EMA 기간 (기본값: 26)
+        signal (int): 시그널선 EMA 기간 (기본값: 9)
+        column (str): DataFrame 사용 시 계산할 컬럼명
+
+    Returns:
+        Tuple[pd.Series, pd.Series, pd.Series]: (MACD선, 시그널선, 히스토그램)
+
+    Raises:
+        ValueError: 데이터 길이가 부족하거나 파라미터가 잘못된 경우
+
+    Examples:
+        >>> df = pd.DataFrame({'Close': [100 + i for i in range(50)]})
+        >>> macd, signal, hist = calculate_macd(df, fast=12, slow=26, signal=9)
+        >>> print(f"MACD: {macd.iloc[-1]:.2f}")
+        >>> print(f"Signal: {signal.iloc[-1]:.2f}")
+        >>> print(f"Histogram: {hist.iloc[-1]:.2f}")
+
+        >>> # 커스텀 파라미터 (5|20|9)
+        >>> macd, signal, hist = calculate_macd(df, fast=5, slow=20, signal=9)
+
+    Notes:
+        - 0선 교차: MACD가 0을 교차 = 단기선과 장기선의 교차
+        - 시그널 교차: MACD와 시그널 교차 = 매매 신호
+        - 히스토그램: MACD 방향성 예측 (확대/축소)
+        - 표준 설정: 12|26|9 (제럴드 아펜)
+    """
+    try:
+        # 파라미터 검증
+        if fast >= slow:
+            raise ValueError(f"fast({fast})는 slow({slow})보다 작아야 합니다.")
+
+        # 입력 데이터 처리
+        if isinstance(data, pd.DataFrame):
+            if column not in data.columns:
+                raise ValueError(f"컬럼 '{column}'이 DataFrame에 없습니다.")
+            series = data[column]
+        elif isinstance(data, pd.Series):
+            series = data
+        else:
+            raise TypeError(f"지원하지 않는 데이터 타입: {type(data)}")
+
+        # 최소 데이터 길이 검증
+        min_length = slow + signal
+        if len(series) < min_length:
+            raise ValueError(
+                f"데이터 길이({len(series)})가 부족합니다. "
+                f"최소 {min_length}일 필요합니다 (slow={slow} + signal={signal})."
+            )
+
+        # 1. 단기/장기 EMA 계산
+        ema_fast = calculate_ema(series, period=fast)
+        ema_slow = calculate_ema(series, period=slow)
+
+        # 2. MACD선 계산
+        macd_line = ema_fast - ema_slow
+
+        # 3. 시그널선 계산 (MACD의 EMA)
+        signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+
+        # 4. 히스토그램 계산
+        histogram = macd_line - signal_line
+
+        logger.debug(
+            f"MACD({fast}|{slow}|{signal}) 계산 완료: "
+            f"MACD={len(macd_line)}개, Signal={len(signal_line)}개, Hist={len(histogram)}개"
+        )
+
+        return macd_line, signal_line, histogram
+
+    except Exception as e:
+        logger.error(f"MACD 계산 중 오류 발생: {e}")
+        raise
+
+
+def calculate_triple_macd(
+        data: Union[pd.Series, pd.DataFrame],
+        column: str = 'Close'
+) -> pd.DataFrame:
+    """
+    3종 MACD 동시 계산 (대순환 분석용)
+
+    이동평균선 대순환 분석을 위한 3개의 MACD를 동시에 계산합니다.
+    각 MACD는 서로 다른 이동평균선 쌍의 관계를 나타냅니다.
+
+    MACD 구성:
+        - MACD(상): 5|20|9 - 단기선(5)과 중기선(20)의 관계
+        - MACD(중): 5|40|9 - 단기선(5)과 장기선(40)의 관계
+        - MACD(하): 20|40|9 - 중기선(20)과 장기선(40)의 관계
+
+    Args:
+        data (pd.Series | pd.DataFrame): 가격 데이터
+        column (str): DataFrame 사용 시 계산할 컬럼명
+
+    Returns:
+        pd.DataFrame: 9개 컬럼을 가진 DataFrame
+            - MACD_상, Signal_상, Hist_상
+            - MACD_중, Signal_중, Hist_중
+            - MACD_하, Signal_하, Hist_하
+
+    Raises:
+        ValueError: 데이터 길이가 부족한 경우 (최소 49일 필요)
+
+    Examples:
+        >>> df = pd.DataFrame({'Close': [100 + i for i in range(100)]})
+        >>> triple_macd = calculate_triple_macd(df)
+        >>> print(triple_macd.columns)
+        Index(['MACD_상', 'Signal_상', 'Hist_상',
+               'MACD_중', 'Signal_중', 'Hist_중',
+               'MACD_하', 'Signal_하', 'Hist_하'], dtype='object')
+
+        >>> # 최근 상태 확인
+        >>> latest = triple_macd.iloc[-1]
+        >>> print(f"MACD(상): {latest['MACD_상']:.2f}")
+        >>> print(f"MACD(중): {latest['MACD_중']:.2f}")
+        >>> print(f"MACD(하): {latest['MACD_하']:.2f}")
+
+    Notes:
+        - 6개 스테이지 판단에 필수적인 지표
+        - MACD 0선 교차 = 해당 이동평균선 쌍의 교차
+        - 3개 MACD 방향이 일치할 때 신뢰도 최대
+        - 최소 49일 데이터 필요 (40 + 9)
+    """
+    try:
+        # 입력 데이터 처리
+        if isinstance(data, pd.DataFrame):
+            if column not in data.columns:
+                raise ValueError(f"컬럼 '{column}'이 DataFrame에 없습니다.")
+            series = data[column]
+            index = data.index
+        elif isinstance(data, pd.Series):
+            series = data
+            index = data.index
+        else:
+            raise TypeError(f"지원하지 않는 데이터 타입: {type(data)}")
+
+        # 최소 데이터 길이 검증 (40 + 9 = 49)
+        min_length = 49
+        if len(series) < min_length:
+            raise ValueError(
+                f"데이터 길이({len(series)})가 부족합니다. "
+                f"최소 {min_length}일 필요합니다."
+            )
+
+        # 결과 저장용 DataFrame
+        result = pd.DataFrame(index=index)
+
+        # 1. MACD(상): 5|20|9 (단기-중기 관계)
+        macd_upper, signal_upper, hist_upper = calculate_macd(
+            series, fast=5, slow=20, signal=9
+        )
+        result['MACD_상'] = macd_upper
+        result['Signal_상'] = signal_upper
+        result['Hist_상'] = hist_upper
+
+        # 2. MACD(중): 5|40|9 (단기-장기 관계)
+        macd_middle, signal_middle, hist_middle = calculate_macd(
+            series, fast=5, slow=40, signal=9
+        )
+        result['MACD_중'] = macd_middle
+        result['Signal_중'] = signal_middle
+        result['Hist_중'] = hist_middle
+
+        # 3. MACD(하): 20|40|9 (중기-장기 관계)
+        macd_lower, signal_lower, hist_lower = calculate_macd(
+            series, fast=20, slow=40, signal=9
+        )
+        result['MACD_하'] = macd_lower
+        result['Signal_하'] = signal_lower
+        result['Hist_하'] = hist_lower
+
+        logger.debug(
+            f"3종 MACD 계산 완료: {len(result)}행 × {len(result.columns)}열"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"3종 MACD 계산 중 오류 발생: {e}")
+        raise
+
 # TODO: 다음 단계에서 구현할 함수들
-# - calculate_macd()
-# - calculate_triple_macd()
-# - detect_peakout()
-# - calculate_slope()
-# - check_direction()
-# - calculate_all_indicators()
+# - detect_peakout() - 피크아웃 감지
+# - calculate_slope() - 기울기 계산
+# - check_direction() - 방향 판단
+# - calculate_all_indicators() - 모든 지표 통합 계산

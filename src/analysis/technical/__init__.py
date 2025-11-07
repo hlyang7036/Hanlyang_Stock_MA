@@ -18,6 +18,8 @@ from .indicators import (
     calculate_sma,
     calculate_true_range,
     calculate_atr,
+    calculate_macd,
+    calculate_triple_macd,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     'calculate_sma',
     'calculate_true_range',
     'calculate_atr',
+    'calculate_macd',
+    'calculate_triple_macd',
 ]

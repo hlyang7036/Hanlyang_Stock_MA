@@ -12,6 +12,8 @@ from src.analysis.technical import (
     calculate_sma,
     calculate_true_range,
     calculate_atr,
+    calculate_macd,
+    calculate_triple_macd,
 )
 
 
@@ -336,6 +338,242 @@ class TestIntegration:
             recent_sma = sma_20.iloc[-10:]
             assert (recent_ema > recent_sma).any()
 
+
+class TestCalculateMACD:
+    """MACD 계산 함수 테스트"""
+
+    def test_macd_basic(self):
+        """기본 MACD 계산 (표준 설정: 12|26|9)"""
+        # 충분한 데이터 생성
+        data = pd.DataFrame({
+            'Close': [100 + i * 0.5 for i in range(50)]
+        })
+
+        # MACD 계산
+        macd, signal, hist = calculate_macd(data, fast=12, slow=26, signal=9)
+
+        # 검증
+        assert isinstance(macd, pd.Series)
+        assert isinstance(signal, pd.Series)
+        assert isinstance(hist, pd.Series)
+        assert len(macd) == len(data)
+        assert len(signal) == len(data)
+        assert len(hist) == len(data)
+
+        # 26+9=35번째부터 모든 값 존재
+        assert not macd.iloc[35:].isna().any()
+        assert not signal.iloc[35:].isna().any()
+        assert not hist.iloc[35:].isna().any()
+
+    def test_macd_custom_params(self):
+        """커스텀 파라미터로 MACD 계산 (5|20|9)"""
+        data = pd.DataFrame({
+            'Close': [100 + i for i in range(50)]
+        })
+
+        # MACD(상): 5|20|9
+        macd, signal, hist = calculate_macd(data, fast=5, slow=20, signal=9)
+
+        # 검증
+        assert not macd.iloc[29:].isna().any()  # 20+9=29
+        assert not signal.iloc[29:].isna().any()
+        assert not hist.iloc[29:].isna().any()
+
+    def test_macd_histogram_calculation(self):
+        """히스토그램 계산 검증"""
+        data = pd.DataFrame({
+            'Close': [100, 102, 104, 106, 108] * 10
+        })
+
+        macd, signal, hist = calculate_macd(data, fast=5, slow=10, signal=3)
+
+        # 히스토그램 = MACD - 시그널
+        expected_hist = macd - signal
+        pd.testing.assert_series_equal(hist, expected_hist)
+
+    def test_macd_zero_cross(self):
+        """MACD 0선 교차 확인"""
+        # 하락 후 상승하는 데이터
+        data = pd.DataFrame({
+            'Close': list(range(100, 80, -1)) + list(range(80, 110))
+        })
+
+        macd, signal, hist = calculate_macd(data, fast=5, slow=20, signal=9)
+
+        # MACD가 음수에서 양수로 변경되는 지점 존재 확인
+        macd_clean = macd.dropna()
+        has_negative = (macd_clean < 0).any()
+        has_positive = (macd_clean > 0).any()
+
+        assert has_negative and has_positive
+
+    def test_macd_with_series(self):
+        """Series로 MACD 계산"""
+        data = pd.Series([100 + i for i in range(50)])
+
+        macd, signal, hist = calculate_macd(data, fast=12, slow=26, signal=9)
+
+        # 검증
+        assert isinstance(macd, pd.Series)
+        assert isinstance(signal, pd.Series)
+        assert isinstance(hist, pd.Series)
+
+    def test_macd_insufficient_data(self):
+        """데이터 부족 시 에러"""
+        data = pd.DataFrame({'Close': [100, 102, 104]})
+
+        with pytest.raises(ValueError, match="데이터 길이.*부족합니다"):
+            calculate_macd(data, fast=12, slow=26, signal=9)
+
+    def test_macd_invalid_params(self):
+        """잘못된 파라미터 에러 (fast >= slow)"""
+        data = pd.DataFrame({'Close': [100 + i for i in range(50)]})
+
+        with pytest.raises(ValueError, match="보다 작아야"):
+            calculate_macd(data, fast=26, slow=12, signal=9)
+
+    def test_macd_invalid_column(self):
+        """존재하지 않는 컬럼 에러"""
+        data = pd.DataFrame({'Close': [100 + i for i in range(50)]})
+
+        with pytest.raises(ValueError, match="컬럼.*없습니다"):
+            calculate_macd(data, fast=12, slow=26, signal=9, column='InvalidColumn')
+
+
+class TestCalculateTripleMACD:
+    """3종 MACD 계산 함수 테스트"""
+
+    def test_triple_macd_basic(self):
+        """기본 3종 MACD 계산"""
+        # 충분한 데이터 생성 (최소 49일)
+        data = pd.DataFrame({
+            'Close': [100 + i for i in range(100)]
+        })
+
+        # 3종 MACD 계산
+        result = calculate_triple_macd(data)
+
+        # 검증 - 9개 컬럼
+        expected_columns = [
+            'MACD_상', 'Signal_상', 'Hist_상',
+            'MACD_중', 'Signal_중', 'Hist_중',
+            'MACD_하', 'Signal_하', 'Hist_하'
+        ]
+        assert list(result.columns) == expected_columns
+
+        # DataFrame 타입
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == len(data)
+
+    def test_triple_macd_values(self):
+        """3종 MACD 값 존재 확인"""
+        data = pd.DataFrame({
+            'Close': [100 + i * 0.5 for i in range(100)]
+        })
+
+        result = calculate_triple_macd(data)
+
+        # 49번째 이후 모든 값 존재 (40 + 9)
+        for col in result.columns:
+            assert not result[col].iloc[49:].isna().any()
+
+    def test_triple_macd_relationships(self):
+        """3종 MACD 간의 관계 확인"""
+        data = pd.DataFrame({
+            'Close': [100 + i for i in range(100)]
+        })
+
+        result = calculate_triple_macd(data)
+
+        # 상승 데이터에서는 모든 MACD가 양수여야 함
+        latest = result.iloc[-1]
+        assert latest['MACD_상'] > 0
+        assert latest['MACD_중'] > 0
+        assert latest['MACD_하'] > 0
+
+    def test_triple_macd_individual_calculation(self):
+        """개별 MACD 계산과 일치하는지 확인"""
+        data = pd.DataFrame({
+            'Close': [100 + i * 0.3 for i in range(100)]
+        })
+
+        # 3종 MACD
+        triple = calculate_triple_macd(data)
+
+        # 개별 계산
+        macd_upper, signal_upper, hist_upper = calculate_macd(data, fast=5, slow=20, signal=9)
+
+        # MACD(상) 비교
+        pd.testing.assert_series_equal(
+            triple['MACD_상'],
+            macd_upper,
+            check_names=False
+        )
+        pd.testing.assert_series_equal(
+            triple['Signal_상'],
+            signal_upper,
+            check_names=False
+        )
+        pd.testing.assert_series_equal(
+            triple['Hist_상'],
+            hist_upper,
+            check_names=False
+        )
+
+    def test_triple_macd_with_series(self):
+        """Series로 3종 MACD 계산"""
+        data = pd.Series([100 + i for i in range(100)])
+
+        result = calculate_triple_macd(data)
+
+        # 검증
+        assert isinstance(result, pd.DataFrame)
+        assert len(result.columns) == 9
+
+    def test_triple_macd_insufficient_data(self):
+        """데이터 부족 시 에러"""
+        data = pd.DataFrame({'Close': [100 + i for i in range(30)]})
+
+        with pytest.raises(ValueError, match="데이터 길이.*부족합니다"):
+            calculate_triple_macd(data)
+
+    def test_triple_macd_invalid_column(self):
+        """존재하지 않는 컬럼 에러"""
+        data = pd.DataFrame({'Close': [100 + i for i in range(100)]})
+
+        with pytest.raises(ValueError, match="컬럼.*없습니다"):
+            calculate_triple_macd(data, column='InvalidColumn')
+
+
+class TestMACDIntegration:
+    """MACD 통합 테스트"""
+
+    def test_all_macd_with_ema(self):
+        """EMA와 MACD 통합 테스트"""
+        # 실제 주가 시뮬레이션
+        np.random.seed(42)
+        data = pd.DataFrame({
+            'Close': 100 + np.random.randn(100).cumsum()
+        })
+
+        # EMA 계산
+        data['EMA_5'] = calculate_ema(data, period=5)
+        data['EMA_20'] = calculate_ema(data, period=20)
+        data['EMA_40'] = calculate_ema(data, period=40)
+
+        # 3종 MACD 계산
+        triple_macd = calculate_triple_macd(data)
+
+        # 데이터 결합
+        data = pd.concat([data, triple_macd], axis=1)
+
+        # 검증
+        assert 'EMA_5' in data.columns
+        assert 'MACD_상' in data.columns
+        assert len(data) == 100
+
+        # 50번째 이후 모든 값 존재
+        assert not data.iloc[50:].isna().any().any()
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
