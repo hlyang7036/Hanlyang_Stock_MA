@@ -1,10 +1,9 @@
 """
 Technical 패키지
 
-기술적 분석 전략 모듈을 포함하는 패키지입니다.
+기술적 분석(Technical Analysis) 모듈
 
-현재 구현:
-- 이동평균선 기반 전략
+이동평균선 투자법 전략에 필요한 기술적 지표 계산 기능을 제공합니다.
 
 향후 확장 가능:
 - RSI 기반 전략
@@ -13,3 +12,17 @@ Technical 패키지
 - 패턴 인식 전략
 등 다양한 기술적 분석 전략을 모듈 형태로 추가 가능
 """
+
+from .indicators import (
+    calculate_ema,
+    calculate_sma,
+    calculate_true_range,
+    calculate_atr,
+)
+
+__all__ = [
+    'calculate_ema',
+    'calculate_sma',
+    'calculate_true_range',
+    'calculate_atr',
+]
