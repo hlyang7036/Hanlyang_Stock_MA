@@ -407,7 +407,7 @@ print(f"손절가: {stop_loss:,.0f}원")
 ## 참고 자료
 
 - [이동평균선 투자법 전략 정리](../Moving_Average_Investment_Strategy_Summary.md)
-- [개발 계획](./2025-10-30_common_modules_planning.md)
+- [개발 계획](plan/2025-10-30_common_modules_planning.md)
 - [데이터 수집 모듈](./2025-10-30_collector_implementation_complete.md)
 
 ---

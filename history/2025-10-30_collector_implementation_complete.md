@@ -360,7 +360,7 @@ price = get_current_price('005930')
 
 ## 참고 문서
 
-- [개발 계획](./2025-10-30_common_modules_planning.md)
+- [개발 계획](plan/2025-10-30_common_modules_planning.md)
 - [데이터 수집 모듈 README](../src/data/README.md)
 - [API 연동 가이드](./2025-10-15_api_integration_and_testing.md)
 

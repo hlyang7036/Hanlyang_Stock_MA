@@ -280,5 +280,5 @@ except Exception as e:
 ## 참고
 
 - [프로젝트 구조](../../README.md)
-- [개발 계획](../../history/2025-10-30_common_modules_planning.md)
+- [개발 계획](../../history/plan/2025-10-30_common_modules_planning.md)
 - [API 연동 가이드](../../history/2025-10-15_api_integration_and_testing.md)

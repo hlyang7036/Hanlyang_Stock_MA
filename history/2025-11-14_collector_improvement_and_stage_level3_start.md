@@ -531,7 +531,7 @@ def test_golden_cross_upper(self):
 
 - [이동평균선 투자법 전략 정리](../Moving_Average_Investment_Strategy_Summary.md)
 - [Level 2: 기술적 지표 모듈](./2025-11-13_technical_indicators_all.md)
-- [Level 3: 스테이지 분석 계획](./2025-11-13_stage_analysis.md)
+- [Level 3: 스테이지 분석 계획](plan/2025-11-13_stage_analysis.md)
 
 ---
 

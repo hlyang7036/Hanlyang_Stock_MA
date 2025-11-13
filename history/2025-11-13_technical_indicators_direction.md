@@ -515,7 +515,7 @@ elif current_stage == 3:
 ## 참고 자료
 
 - [이동평균선 투자법 전략 정리](../Moving_Average_Investment_Strategy_Summary.md)
-- [개발 계획](./2025-10-30_common_modules_planning.md)
+- [개발 계획](plan/2025-10-30_common_modules_planning.md)
 - [Level 2-1단계: 기본 지표](./2025-11-07_technical_indicators_basic.md)
 - [Level 2-2단계: MACD](./2025-11-07_technical_indicators_macd.md)
 

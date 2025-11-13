@@ -257,7 +257,7 @@ sys.path.insert(0, utils_path)
 
 ## 참고 자료
 
-- [개발 계획](./2025-10-30_common_modules_planning.md)
+- [개발 계획](plan/2025-10-30_common_modules_planning.md)
 - [API 연동 가이드](./2025-10-15_api_integration_and_testing.md)
 - [프로젝트 README](../README.md)
 

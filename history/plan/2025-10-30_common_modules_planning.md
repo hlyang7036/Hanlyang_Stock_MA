@@ -326,9 +326,9 @@ src/
 
 ## 참고 문서
 
-- [이동평균선 투자법 전략 정리](../Moving_Average_Investment_Strategy_Summary.md)
-- [API 연동 및 테스트](./2025-10-15_api_integration_and_testing.md)
-- [프로젝트 README](../README.md)
+- [이동평균선 투자법 전략 정리](../../Moving_Average_Investment_Strategy_Summary.md)
+- [API 연동 및 테스트](../2025-10-15_api_integration_and_testing.md)
+- [프로젝트 README](../../README.md)
 
 ---
 

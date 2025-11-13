@@ -191,3 +191,227 @@ def detect_macd_zero_cross(data: pd.DataFrame) -> pd.DataFrame:
                 f"총 {total_crosses}회 (골든 {golden_crosses}회, 데드 {dead_crosses}회)")
     
     return crosses
+
+
+def determine_stage(data: pd.DataFrame) -> pd.Series:
+    """
+    이동평균선 배열과 MACD 0선 교차를 종합하여 현재 스테이지 판단
+    
+    6단계 스테이지 대순환 분석의 핵심 함수입니다.
+    이동평균선 배열로 기본 스테이지를 판단하고,
+    MACD 0선 교차로 스테이지 전환을 확정합니다.
+    
+    Args:
+        data: DataFrame (모든 지표 포함)
+              필수 컬럼: EMA_5, EMA_20, EMA_40, MACD_상, MACD_중, MACD_하
+    
+    Returns:
+        pd.Series: 각 시점의 스테이지 (1~6)
+            1: 안정 상승기 (완전 정배열)
+            2: 하락 변화기1 (데드크로스1 발생)
+            3: 하락 변화기2 (데드크로스2 발생)
+            4: 안정 하락기 (완전 역배열)
+            5: 상승 변화기1 (골든크로스1 발생)
+            6: 상승 변화기2 (골든크로스2 발생)
+    
+    Raises:
+        TypeError: data가 DataFrame이 아닐 때
+        ValueError: 필수 컬럼이 없을 때
+    
+    Notes:
+        스테이지 판단 우선순위:
+        1. MACD 0선 교차 (최우선) - 스테이지 전환 확정
+        2. 이동평균선 배열 (기본) - 기본 스테이지 판단
+        
+        MACD 교차 우선순위 (동시 발생 시):
+        Cross_하 > Cross_중 > Cross_상
+        
+        스테이지 전환 매핑:
+        - Cross_하 = 1 (골든크로스3) → 제1스테이지
+        - Cross_상 = -1 (데드크로스1) → 제2스테이지
+        - Cross_중 = -1 (데드크로스2) → 제3스테이지
+        - Cross_하 = -1 (데드크로스3) → 제4스테이지
+        - Cross_상 = 1 (골든크로스1) → 제5스테이지
+        - Cross_중 = 1 (골든크로스2) → 제6스테이지
+    
+    Examples:
+        >>> from src.data import get_stock_data
+        >>> from src.analysis.technical import calculate_all_indicators
+        >>> 
+        >>> # 데이터 수집 및 지표 계산
+        >>> df = get_stock_data('005930', days=100)
+        >>> df = calculate_all_indicators(df)
+        >>> 
+        >>> # 스테이지 판단
+        >>> df['Stage'] = determine_stage(df)
+        >>> 
+        >>> # 현재 스테이지 확인
+        >>> current_stage = df['Stage'].iloc[-1]
+        >>> print(f"현재 스테이지: {current_stage}")
+    """
+    # 입력 검증
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError(f"DataFrame이 필요합니다. 입력 타입: {type(data)}")
+    
+    required_columns = ['EMA_5', 'EMA_20', 'EMA_40', 'MACD_상', 'MACD_중', 'MACD_하']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise ValueError(f"필수 컬럼이 없습니다: {missing_columns}")
+    
+    logger.debug(f"스테이지 판단 시작: {len(data)}개 데이터")
+    
+    # 1단계: 이동평균선 배열로 기본 스테이지 판단
+    stage = determine_ma_arrangement(data)
+    logger.debug("1단계: 이동평균선 배열 기반 스테이지 판단 완료")
+    
+    # 2단계: MACD 0선 교차 감지
+    crosses = detect_macd_zero_cross(data)
+    logger.debug("2단계: MACD 0선 교차 감지 완료")
+    
+    # 3단계: MACD 교차로 스테이지 확정 (우선순위: 하 > 중 > 상)
+    # MACD(하) 골든크로스 → 제1스테이지 확정
+    stage[crosses['Cross_하'] == 1] = 1
+    gc3_count = (crosses['Cross_하'] == 1).sum()
+    if gc3_count > 0:
+        logger.info(f"골든크로스3 발생: {gc3_count}회 → 제1스테이지 확정")
+    
+    # MACD(하) 데드크로스 → 제4스테이지 확정
+    stage[crosses['Cross_하'] == -1] = 4
+    dc3_count = (crosses['Cross_하'] == -1).sum()
+    if dc3_count > 0:
+        logger.info(f"데드크로스3 발생: {dc3_count}회 → 제4스테이지 확정")
+    
+    # MACD(중) 골든크로스 → 제6스테이지 확정
+    stage[crosses['Cross_중'] == 1] = 6
+    gc2_count = (crosses['Cross_중'] == 1).sum()
+    if gc2_count > 0:
+        logger.info(f"골든크로스2 발생: {gc2_count}회 → 제6스테이지 확정")
+    
+    # MACD(중) 데드크로스 → 제3스테이지 확정
+    stage[crosses['Cross_중'] == -1] = 3
+    dc2_count = (crosses['Cross_중'] == -1).sum()
+    if dc2_count > 0:
+        logger.info(f"데드크로스2 발생: {dc2_count}회 → 제3스테이지 확정")
+    
+    # MACD(상) 골든크로스 → 제5스테이지 확정
+    stage[crosses['Cross_상'] == 1] = 5
+    gc1_count = (crosses['Cross_상'] == 1).sum()
+    if gc1_count > 0:
+        logger.info(f"골든크로스1 발생: {gc1_count}회 → 제5스테이지 확정")
+    
+    # MACD(상) 데드크로스 → 제2스테이지 확정
+    stage[crosses['Cross_상'] == -1] = 2
+    dc1_count = (crosses['Cross_상'] == -1).sum()
+    if dc1_count > 0:
+        logger.info(f"데드크로스1 발생: {dc1_count}회 → 제2스테이지 확정")
+    
+    # 스테이지 분포 로깅
+    stage_counts = stage.value_counts().sort_index()
+    logger.debug(f"스테이지 분포: {stage_counts.to_dict()}")
+    
+    logger.debug("3단계: MACD 교차 기반 스테이지 확정 완료")
+    logger.info(f"스테이지 판단 완료: 총 {len(stage)}개")
+    
+    return stage
+
+
+def detect_stage_transition(data: pd.DataFrame) -> pd.Series:
+    """
+    스테이지 전환 시점 감지
+    
+    이전 스테이지와 현재 스테이지를 비교하여 전환 발생 여부와
+    전환 유형을 판단합니다.
+    
+    Args:
+        data: DataFrame (Stage 컬럼 필요)
+    
+    Returns:
+        pd.Series: 스테이지 전환 정보
+            0: 전환 없음
+            12: 제1→제2 전환 (데드크로스1)
+            23: 제2→제3 전환 (데드크로스2)
+            34: 제3→제4 전환 (데드크로스3)
+            45: 제4→제5 전환 (골든크로스1)
+            56: 제5→제6 전환 (골든크로스2)
+            61: 제6→제1 전환 (골든크로스3, 순환 완료)
+            기타: 비순차 전환 (예: 13, 24 등)
+    
+    Raises:
+        TypeError: data가 DataFrame이 아닐 때
+        ValueError: Stage 컬럼이 없을 때
+    
+    Notes:
+        전환 값 인코딩: 이전 스테이지 * 10 + 현재 스테이지
+        
+        정상 순차 전환:
+        - 12, 23, 34, 45, 56, 61 (순환)
+        
+        비순차 전환 (급격한 변화):
+        - 13, 24, 35 등 (드물지만 가능)
+        
+        첫 번째 데이터는 이전 비교 대상이 없으므로 0 반환
+    
+    Examples:
+        >>> df = pd.DataFrame({
+        ...     'Stage': [1, 1, 2, 2, 3, 3]
+        ... })
+        >>> transition = detect_stage_transition(df)
+        >>> print(transition)
+        0     0
+        1     0
+        2    12
+        3     0
+        4    23
+        5     0
+        dtype: int64
+        
+        >>> # 전환 발생 지점만 추출
+        >>> transitions = df[transition != 0]
+        >>> print(transitions)
+    """
+    # 입력 검증
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError(f"DataFrame이 필요합니다. 입력 타입: {type(data)}")
+    
+    if 'Stage' not in data.columns:
+        raise ValueError("Stage 컬럼이 필요합니다")
+    
+    logger.debug(f"스테이지 전환 감지 시작: {len(data)}개 데이터")
+    
+    # 현재 및 이전 스테이지
+    current_stage = data['Stage']
+    prev_stage = current_stage.shift(1)
+    
+    # 전환 여부 확인
+    is_transition = (current_stage != prev_stage)
+    
+    # 전환 값 계산: 이전*10 + 현재
+    transition = prev_stage * 10 + current_stage
+    
+    # 전환 없으면 0
+    transition[~is_transition] = 0
+    
+    # 첫 행은 비교 불가 → 0
+    transition.iloc[0] = 0
+    
+    # NaN 처리 (Stage가 NaN이면 transition도 NaN)
+    transition[current_stage.isna()] = np.nan
+    
+    # 전환 발생 통계
+    transition_count = (transition != 0).sum()
+    if transition_count > 0:
+        logger.info(f"스테이지 전환 발생: 총 {transition_count}회")
+        
+        # 전환 유형별 집계
+        transition_types = transition[transition != 0].value_counts().sort_index()
+        for trans_value, count in transition_types.items():
+            if not np.isnan(trans_value):
+                prev = int(trans_value / 10)
+                curr = int(trans_value % 10)
+                logger.debug(f"  제{prev}→제{curr} 전환: {count}회")
+    else:
+        logger.debug("스테이지 전환 없음")
+    
+    logger.debug("스테이지 전환 감지 완료")
+    
+    return transition.astype('Int64')  # nullable integer

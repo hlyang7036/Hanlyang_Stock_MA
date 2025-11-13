@@ -814,9 +814,9 @@ Level 3 완료 후:
 
 ## 참고 자료
 
-- [이동평균선 투자법 전략 정리](../Moving_Average_Investment_Strategy_Summary.md)
-- [개발 계획](./2025-10-30_common_modules_planning.md)
-- [Level 2: 기술적 지표 모듈](./2025-11-13_technical_indicators_all.md)
+- [이동평균선 투자법 전략 정리](../../Moving_Average_Investment_Strategy_Summary.md)
+- [개발 계획](2025-10-30_common_modules_planning.md)
+- [Level 2: 기술적 지표 모듈](../2025-11-13_technical_indicators_all.md)
 
 ---
 
