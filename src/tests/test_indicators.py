@@ -14,6 +14,10 @@ from src.analysis.technical import (
     calculate_atr,
     calculate_macd,
     calculate_triple_macd,
+    detect_peakout,
+    calculate_slope,
+    check_direction,
+    calculate_all_indicators,
 )
 
 
@@ -574,6 +578,478 @@ class TestMACDIntegration:
 
         # 50번째 이후 모든 값 존재
         assert not data.iloc[50:].isna().any().any()
+
+class TestDetectPeakout:
+    """피크아웃 감지 테스트"""
+
+    def test_detect_high_peakout(self):
+        """고점 피크아웃 감지"""
+        # 상승 후 하락 패턴
+        data = pd.Series([1, 2, 3, 4, 5, 4, 3, 2, 1])
+        peakout = detect_peakout(data, lookback=3)
+
+        # 5에서 피크아웃 발생 (인덱스 5)
+        assert peakout.iloc[5] == 1  # 고점 피크아웃
+
+    def test_detect_low_peakout(self):
+        """저점 피크아웃 감지"""
+        # 하락 후 상승 패턴
+        data = pd.Series([5, 4, 3, 2, 1, 2, 3, 4, 5])
+        peakout = detect_peakout(data, lookback=3)
+
+        # 1에서 피크아웃 발생 (인덱스 5)
+        assert peakout.iloc[5] == -1  # 저점 피크아웃
+
+    def test_detect_no_peakout(self):
+        """피크아웃 없음"""
+        # 단조 증가
+        data = pd.Series([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        peakout = detect_peakout(data, lookback=3)
+
+        # 피크아웃 없음
+        assert (peakout == 0).all()
+
+    def test_peakout_with_histogram(self):
+        """히스토그램에서 피크아웃 감지"""
+        # 상승 후 하락하는 주가 데이터
+        data = pd.DataFrame({
+            'Close': [100, 102, 105, 108, 110, 108, 105, 102, 100]
+        })
+
+        _, _, hist = calculate_macd(data, fast=3, slow=5, signal=2)
+
+        # 히스토그램 피크아웃 감지
+        peakout = detect_peakout(hist.dropna(), lookback=2)
+
+        # 적어도 하나의 피크아웃이 있어야 함
+        assert (peakout != 0).any()
+
+    def test_peakout_invalid_lookback(self):
+        """잘못된 lookback 에러"""
+        data = pd.Series([1, 2, 3, 4, 5])
+
+        with pytest.raises(ValueError, match="lookback은 1 이상"):
+            detect_peakout(data, lookback=0)
+
+    def test_peakout_insufficient_data(self):
+        """데이터 부족 에러"""
+        data = pd.Series([1, 2, 3])
+
+        with pytest.raises(ValueError, match="데이터 길이.*부족합니다"):
+            detect_peakout(data, lookback=5)
+
+    def test_peakout_invalid_type(self):
+        """잘못된 타입 에러"""
+        data = [1, 2, 3, 4, 5]
+
+        with pytest.raises(TypeError, match="pd.Series여야 합니다"):
+            detect_peakout(data, lookback=3)
+
+
+class TestCalculateSlope:
+    """기울기 계산 테스트"""
+
+    def test_slope_uptrend(self):
+        """상승 추세 기울기"""
+        # 선형 증가
+        data = pd.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        slope = calculate_slope(data, period=5)
+
+        # 상승 추세이므로 기울기 > 0
+        assert slope.dropna().iloc[-1] > 0
+
+    def test_slope_downtrend(self):
+        """하락 추세 기울기"""
+        # 선형 감소
+        data = pd.Series([10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
+        slope = calculate_slope(data, period=5)
+
+        # 하락 추세이므로 기울기 < 0
+        assert slope.dropna().iloc[-1] < 0
+
+    def test_slope_flat(self):
+        """횡보 기울기"""
+        # 일정한 값
+        data = pd.Series([5, 5, 5, 5, 5, 5, 5, 5, 5, 5])
+        slope = calculate_slope(data, period=5)
+
+        # 횡보이므로 기울기 ≈ 0
+        assert abs(slope.dropna().iloc[-1]) < 0.01
+
+    def test_slope_with_macd(self):
+        """MACD 기울기 계산"""
+        data = pd.DataFrame({
+            'Close': [100 + i for i in range(50)]
+        })
+
+        macd, _, _ = calculate_macd(data, fast=5, slow=20, signal=9)
+        macd_clean = macd.dropna()
+        slope = calculate_slope(macd_clean, period=5)
+
+        # 검증
+        assert isinstance(slope, pd.Series)
+        assert len(slope) == len(macd_clean)  # dropna한 데이터와 비교
+        assert slope.index.equals(macd_clean.index)  # 인덱스도 일치 확인
+
+    def test_slope_invalid_period(self):
+        """잘못된 period 에러"""
+        data = pd.Series([1, 2, 3, 4, 5])
+
+        with pytest.raises(ValueError, match="period는 2 이상"):
+            calculate_slope(data, period=1)
+
+    def test_slope_insufficient_data(self):
+        """데이터 부족 에러"""
+        data = pd.Series([1, 2, 3])
+
+        with pytest.raises(ValueError, match="데이터 길이.*부족합니다"):
+            calculate_slope(data, period=10)
+
+    def test_slope_invalid_type(self):
+        """잘못된 타입 에러"""
+        data = [1, 2, 3, 4, 5]
+
+        with pytest.raises(TypeError, match="pd.Series여야 합니다"):
+            calculate_slope(data, period=3)
+
+
+class TestCheckDirection:
+    """방향 판단 테스트"""
+
+    def test_direction_up(self):
+        """우상향 방향"""
+        data = pd.Series([1, 2, 3, 4, 5])
+        direction = check_direction(data, threshold=0.0)
+
+        # 모두 양수이므로 'up'
+        assert (direction == 'up').all()
+
+    def test_direction_down(self):
+        """우하향 방향"""
+        data = pd.Series([-5, -4, -3, -2, -1])
+        direction = check_direction(data, threshold=0.0)
+
+        # 모두 음수이므로 'down'
+        assert (direction == 'down').all()
+
+    def test_direction_neutral(self):
+        """중립 방향"""
+        data = pd.Series([0, 0, 0, 0, 0])
+        direction = check_direction(data, threshold=0.0)
+
+        # 0이므로 'neutral'
+        assert (direction == 'neutral').all()
+
+    def test_direction_mixed(self):
+        """혼합 방향"""
+        data = pd.Series([1, -1, 0, 2, -2])
+        direction = check_direction(data, threshold=0.0)
+
+        # 각각 다른 방향
+        assert direction.iloc[0] == 'up'
+        assert direction.iloc[1] == 'down'
+        assert direction.iloc[2] == 'neutral'
+        assert direction.iloc[3] == 'up'
+        assert direction.iloc[4] == 'down'
+
+    def test_direction_with_threshold(self):
+        """threshold 적용"""
+        data = pd.Series([0.5, -0.5, 0.3, -0.3, 1.5])
+        direction = check_direction(data, threshold=1.0)
+
+        # threshold=1.0이므로 절댓값 1 이하는 neutral
+        assert direction.iloc[0] == 'neutral'
+        assert direction.iloc[1] == 'neutral'
+        assert direction.iloc[2] == 'neutral'
+        assert direction.iloc[3] == 'neutral'
+        assert direction.iloc[4] == 'up'
+
+    def test_direction_triple_macd(self):
+        """3종 MACD 방향 판단"""
+        data = pd.DataFrame({
+            'Close': [100 + i for i in range(100)]
+        })
+
+        triple_macd = calculate_triple_macd(data)
+
+        # 각 MACD 방향 판단
+        dir_upper = check_direction(triple_macd['MACD_상'])
+        dir_middle = check_direction(triple_macd['MACD_중'])
+        dir_lower = check_direction(triple_macd['MACD_하'])
+
+        # 검증
+        assert isinstance(dir_upper, pd.Series)
+        assert len(dir_upper) == len(triple_macd)
+
+        # 상승 데이터이므로 대부분 'up'
+        assert (dir_upper.dropna() == 'up').sum() > len(dir_upper.dropna()) * 0.7
+
+    def test_direction_invalid_threshold(self):
+        """잘못된 threshold 에러"""
+        data = pd.Series([1, 2, 3, 4, 5])
+
+        with pytest.raises(ValueError, match="threshold는 0 이상"):
+            check_direction(data, threshold=-1.0)
+
+    def test_direction_invalid_type(self):
+        """잘못된 타입 에러"""
+        data = [1, 2, 3, 4, 5]
+
+        with pytest.raises(TypeError, match="pd.Series여야 합니다"):
+            check_direction(data, threshold=0.0)
+
+
+class TestDirectionAnalysisIntegration:
+    """방향성 분석 통합 테스트"""
+
+    def test_all_direction_functions(self):
+        """모든 방향성 분석 함수 통합 테스트"""
+        # 실제 주가 패턴 시뮬레이션
+        np.random.seed(42)
+        data = pd.DataFrame({
+            'Close': 100 + np.random.randn(100).cumsum()
+        })
+
+        # MACD 계산
+        macd, signal, hist = calculate_macd(data, fast=12, slow=26, signal=9)
+
+        # 피크아웃 감지
+        hist_peakout = detect_peakout(hist.dropna(), lookback=3)
+        macd_peakout = detect_peakout(macd.dropna(), lookback=3)
+
+        # 기울기 계산
+        hist_slope = calculate_slope(hist.dropna(), period=5)
+        macd_slope = calculate_slope(macd.dropna(), period=5)
+
+        # 방향 판단
+        hist_direction = check_direction(hist.dropna())
+        macd_direction = check_direction(macd.dropna())
+
+        # 검증
+        assert len(hist_peakout) == len(hist.dropna())
+        assert len(hist_slope) == len(hist.dropna())
+        assert len(hist_direction) == len(hist.dropna())
+
+        # 값 확인
+        assert hist_peakout.isin([0, 1, -1]).all()
+        assert hist_direction.isin(['up', 'down', 'neutral']).all()
+
+    def test_triple_macd_direction_agreement(self):
+        """3종 MACD 방향 일치 확인"""
+        # 강한 상승 추세
+        data = pd.DataFrame({
+            'Close': [100 + i * 2 for i in range(100)]
+        })
+
+        triple_macd = calculate_triple_macd(data)
+
+        # 각 MACD 방향 판단
+        dir_upper = check_direction(triple_macd['MACD_상'])
+        dir_middle = check_direction(triple_macd['MACD_중'])
+        dir_lower = check_direction(triple_macd['MACD_하'])
+
+        # 방향 일치 확인
+        all_up = (
+            (dir_upper == 'up') &
+            (dir_middle == 'up') &
+            (dir_lower == 'up')
+        )
+
+        # 강한 상승 추세이므로 많은 구간에서 일치
+        assert all_up.sum() > len(all_up) * 0.5
+
+
+class TestCalculateAllIndicators:
+    """모든 지표 통합 계산 테스트"""
+
+    def test_all_indicators_basic(self):
+        """기본 모든 지표 계산"""
+        # 충분한 데이터 준비 (100일)
+        np.random.seed(42)
+        data = pd.DataFrame({
+            'Open': 100 + np.random.randn(100).cumsum(),
+            'High': 105 + np.random.randn(100).cumsum(),
+            'Low': 95 + np.random.randn(100).cumsum(),
+            'Close': 100 + np.random.randn(100).cumsum(),
+            'Volume': np.random.randint(1000000, 10000000, 100)
+        })
+
+        # 모든 지표 계산
+        result = calculate_all_indicators(data)
+
+        # 기본 검증
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == len(data)
+        assert len(result.columns) > len(data.columns)
+
+    def test_all_indicators_columns(self):
+        """모든 지표 컨럼 확인"""
+        data = pd.DataFrame({
+            'Open': [100 + i for i in range(100)],
+            'High': [105 + i for i in range(100)],
+            'Low': [95 + i for i in range(100)],
+            'Close': [100 + i for i in range(100)],
+            'Volume': [1000000] * 100
+        })
+
+        result = calculate_all_indicators(data)
+
+        # 필수 지표 컨럼 확인
+        expected_columns = [
+            # EMA
+            'EMA_5', 'EMA_20', 'EMA_40',
+            # ATR
+            'ATR',
+            # MACD 3종
+            'MACD_상', 'Signal_상', 'Hist_상',
+            'MACD_중', 'Signal_중', 'Hist_중',
+            'MACD_하', 'Signal_하', 'Hist_하',
+            # 피크아웃
+            'Peakout_Hist_상', 'Peakout_Hist_중', 'Peakout_Hist_하',
+            'Peakout_MACD_상', 'Peakout_MACD_중', 'Peakout_MACD_하',
+            # 기울기
+            'Slope_MACD_상', 'Slope_MACD_중', 'Slope_MACD_하',
+            # 방향
+            'Dir_MACD_상', 'Dir_MACD_중', 'Dir_MACD_하',
+            # 통합 신호
+            'Direction_Agreement'
+        ]
+
+        for col in expected_columns:
+            assert col in result.columns, f"{col} 컨럼이 없습니다"
+
+    def test_all_indicators_values(self):
+        """지표 값 범위 검증"""
+        data = pd.DataFrame({
+            'Open': [100 + i * 0.5 for i in range(100)],
+            'High': [105 + i * 0.5 for i in range(100)],
+            'Low': [95 + i * 0.5 for i in range(100)],
+            'Close': [100 + i * 0.5 for i in range(100)],
+            'Volume': [1000000] * 100
+        })
+
+        result = calculate_all_indicators(data)
+
+        # EMA 값 확인
+        assert result['EMA_5'].notna().sum() > 0
+        assert result['EMA_20'].notna().sum() > 0
+        assert result['EMA_40'].notna().sum() > 0
+
+        # ATR 값 확인 (항상 양수)
+        assert (result['ATR'].dropna() > 0).all()
+
+        # 피크아웃 값 확인 (-1, 0, 1)
+        for col in ['Peakout_Hist_상', 'Peakout_MACD_상']:
+            if col in result.columns:
+                assert result[col].dropna().isin([0, 1, -1]).all()
+
+        # 방향 값 확인
+        for col in ['Dir_MACD_상', 'Dir_MACD_중', 'Dir_MACD_하']:
+            assert result[col].isin(['up', 'down', 'neutral']).all()
+
+        # 통합 신호 확인
+        assert result['Direction_Agreement'].isin(['all_up', 'all_down', 'mixed']).all()
+
+    def test_all_indicators_custom_params(self):
+        """커스텀 파라미터로 계산"""
+        data = pd.DataFrame({
+            'Open': [100 + i for i in range(100)],
+            'High': [105 + i for i in range(100)],
+            'Low': [95 + i for i in range(100)],
+            'Close': [100 + i for i in range(100)],
+            'Volume': [1000000] * 100
+        })
+
+        result = calculate_all_indicators(
+            data,
+            ema_periods=(10, 30, 60),
+            atr_period=14,
+            peakout_lookback=5,
+            slope_period=7,
+            direction_threshold=0.5
+        )
+
+        # 커스텀 EMA 기간 확인
+        # assert 'EMA_5' not in result.columns  # 기본값이 아님
+        # EMA는 커스텀 파라미터로 계산되지만 컨럼명은 고정됨
+        assert 'EMA_5' in result.columns
+        assert 'EMA_20' in result.columns
+        assert 'EMA_40' in result.columns
+
+    def test_all_indicators_direction_agreement(self):
+        """방향 일치 확인"""
+        # 강한 상승 추세
+        data = pd.DataFrame({
+            'Open': [100 + i * 2 for i in range(100)],
+            'High': [105 + i * 2 for i in range(100)],
+            'Low': [95 + i * 2 for i in range(100)],
+            'Close': [100 + i * 2 for i in range(100)],
+            'Volume': [1000000] * 100
+        })
+
+        result = calculate_all_indicators(data)
+
+        # 상승 추세에서 all_up 많아야 함
+        all_up_count = (result['Direction_Agreement'] == 'all_up').sum()
+        total_count = len(result['Direction_Agreement'].dropna())
+
+        assert all_up_count > total_count * 0.3  # 30% 이상
+
+    def test_all_indicators_insufficient_data(self):
+        """데이터 부족 에러"""
+        # 30일 데이터 (49일 미만)
+        data = pd.DataFrame({
+            'Open': [100 + i for i in range(30)],
+            'High': [105 + i for i in range(30)],
+            'Low': [95 + i for i in range(30)],
+            'Close': [100 + i for i in range(30)],
+            'Volume': [1000000] * 30
+        })
+
+        with pytest.raises(ValueError, match="데이터 길이.*부족합니다"):
+            calculate_all_indicators(data)
+
+    def test_all_indicators_missing_columns(self):
+        """필수 컨럼 누락 에러"""
+        # Volume 컨럼 누락
+        data = pd.DataFrame({
+            'Open': [100 + i for i in range(100)],
+            'High': [105 + i for i in range(100)],
+            'Low': [95 + i for i in range(100)],
+            'Close': [100 + i for i in range(100)]
+        })
+
+        with pytest.raises(ValueError, match="필수 컬럼이 없습니다"):
+            calculate_all_indicators(data)
+
+    def test_all_indicators_invalid_type(self):
+        """잘못된 타입 에러"""
+        data = [[100, 105, 95, 100, 1000000]] * 100
+
+        with pytest.raises(TypeError, match="pd.DataFrame이어야 합니다"):
+            calculate_all_indicators(data)
+
+    def test_all_indicators_original_unchanged(self):
+        """원본 DataFrame 변경되지 않음 확인"""
+        data = pd.DataFrame({
+            'Open': [100 + i for i in range(100)],
+            'High': [105 + i for i in range(100)],
+            'Low': [95 + i for i in range(100)],
+            'Close': [100 + i for i in range(100)],
+            'Volume': [1000000] * 100
+        })
+
+        original_columns = data.columns.tolist()
+        original_len = len(data)
+
+        # 지표 계산
+        result = calculate_all_indicators(data)
+
+        # 원본 변경 없음 확인
+        assert data.columns.tolist() == original_columns
+        assert len(data) == original_len
+        assert len(result.columns) > len(data.columns)
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

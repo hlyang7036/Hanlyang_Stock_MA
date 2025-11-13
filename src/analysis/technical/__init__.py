@@ -20,6 +20,10 @@ from .indicators import (
     calculate_atr,
     calculate_macd,
     calculate_triple_macd,
+    detect_peakout,
+    calculate_slope,
+    check_direction,
+    calculate_all_indicators,
 )
 
 __all__ = [
@@ -29,4 +33,8 @@ __all__ = [
     'calculate_atr',
     'calculate_macd',
     'calculate_triple_macd',
+    'detect_peakout',
+    'calculate_slope',
+    'check_direction',
+    'calculate_all_indicators',
 ]

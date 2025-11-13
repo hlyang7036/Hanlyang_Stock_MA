@@ -468,8 +468,468 @@ def calculate_triple_macd(
         logger.error(f"3종 MACD 계산 중 오류 발생: {e}")
         raise
 
-# TODO: 다음 단계에서 구현할 함수들
-# - detect_peakout() - 피크아웃 감지
-# - calculate_slope() - 기울기 계산
-# - check_direction() - 방향 판단
-# - calculate_all_indicators() - 모든 지표 통합 계산
+def detect_peakout(
+        series: pd.Series,
+        lookback: int = 3
+) -> pd.Series:
+    """
+    피크아웃(Peakout) 감지 - 방향 전환 포인트 탐지
+    
+    피크아웃은 히스토그램이나 MACD선이 최고점 또는 최저점을 찍고
+    방향을 전환하는 지점을 의미합니다. 청산 신호로 활용됩니다.
+    
+    감지 방법:
+        - 고점 피크아웃: 현재 값 < lookback 기간 내 최댓값
+        - 저점 피크아웃: 현재 값 > lookback 기간 내 최솟값
+    
+    Args:
+        series (pd.Series): MACD선, 히스토그램 등의 시계열 데이터
+        lookback (int): 피크아웃 감지를 위한 lookback 기간 (기본값: 3)
+    
+    Returns:
+        pd.Series: 피크아웃 신호
+            - 1: 고점 피크아웃 (상승 후 하락 전환)
+            - -1: 저점 피크아웃 (하락 후 상승 전환)
+            - 0: 피크아웃 없음
+    
+    Raises:
+        ValueError: lookback이 1보다 작을 경우
+        TypeError: series가 pd.Series가 아닐 경우
+    
+    Examples:
+        >>> # 히스토그램 피크아웃 감지
+        >>> df = pd.DataFrame({'Close': [100, 102, 105, 103, 101, 99, 101, 103]})
+        >>> macd, signal, hist = calculate_macd(df, fast=5, slow=10, signal=3)
+        >>> peakout = detect_peakout(hist, lookback=3)
+        >>> print(peakout[peakout != 0])  # 피크아웃 지점만 출력
+        
+        >>> # MACD선 피크아웃 감지
+        >>> macd_peakout = detect_peakout(macd, lookback=3)
+    
+    Notes:
+        - 히스토그램 피크아웃: 경계 태세 (청산 1단계)
+        - MACD선 피크아웃: 50% 청산 (청산 2단계)
+        - MACD-시그널 교차: 100% 청산 (청산 3단계)
+        - lookback이 클수록 더 확실한 피크아웃만 감지
+    """
+    try:
+        # 입력 검증
+        if not isinstance(series, pd.Series):
+            raise TypeError(f"series는 pd.Series여야 합니다. 현재: {type(series)}")
+        
+        if lookback < 1:
+            raise ValueError(f"lookback은 1 이상이어야 합니다. 현재: {lookback}")
+        
+        if len(series) < lookback + 1:
+            raise ValueError(
+                f"데이터 길이({len(series)})가 부족합니다. "
+                f"최소 {lookback + 1}개 필요합니다."
+            )
+        
+        # 결과 시리즈 초기화
+        peakout = pd.Series(0, index=series.index)
+        
+        # lookback 기간 동안의 최댓값/최솟값 계산
+        rolling_max = series.rolling(window=lookback + 1, min_periods=lookback + 1).max()
+        rolling_min = series.rolling(window=lookback + 1, min_periods=lookback + 1).min()
+        
+        # 고점 피크아웃 감지
+        # 조건: 현재 값이 최댓값보다 작고, 최댓값이 lookback 기간 전에 발생
+        is_high_peakout = (
+            (series < rolling_max) &  # 현재 값 < 최댓값
+            (series.shift(1) == rolling_max.shift(1))  # 직전이 최고점
+        )
+        
+        # 저점 피크아웃 감지
+        # 조건: 현재 값이 최솟값보다 크고, 최솟값이 lookback 기간 전에 발생
+        is_low_peakout = (
+            (series > rolling_min) &  # 현재 값 > 최솟값
+            (series.shift(1) == rolling_min.shift(1))  # 직전이 최저점
+        )
+        
+        # 피크아웃 신호 설정
+        peakout[is_high_peakout] = 1   # 고점 피크아웃
+        peakout[is_low_peakout] = -1   # 저점 피크아웃
+        
+        logger.debug(
+            f"피크아웃 감지 완료: "
+            f"고점 {is_high_peakout.sum()}개, 저점 {is_low_peakout.sum()}개"
+        )
+        
+        return peakout
+    
+    except Exception as e:
+        logger.error(f"피크아웃 감지 중 오류 발생: {e}")
+        raise
+
+
+def calculate_slope(
+        series: pd.Series,
+        period: int = 5
+) -> pd.Series:
+    """
+    기울기 계산 - 우상향/우하향 판단
+    
+    지정된 기간 동안의 선형 회귀 기울기를 계산하여
+    추세의 방향과 강도를 수치화합니다.
+    
+    계산 방법:
+        - 최근 period 기간의 선형 회귀 기울기
+        - 양수: 우상향 (상승 추세)
+        - 음수: 우하향 (하락 추세)
+        - 0에 가까움: 횡보
+    
+    Args:
+        series (pd.Series): MACD, 히스토그램 등의 시계열 데이터
+        period (int): 기울기 계산 기간 (기본값: 5)
+    
+    Returns:
+        pd.Series: 각 시점의 기울기 값
+    
+    Raises:
+        ValueError: period가 2보다 작을 경우
+        TypeError: series가 pd.Series가 아닐 경우
+    
+    Examples:
+        >>> # MACD 기울기 계산
+        >>> df = pd.DataFrame({'Close': [100 + i for i in range(50)]})
+        >>> macd, signal, hist = calculate_macd(df, fast=5, slow=20, signal=9)
+        >>> slope = calculate_slope(macd, period=5)
+        >>> print(f"최근 기울기: {slope.iloc[-1]:.4f}")
+        
+        >>> # 히스토그램 기울기
+        >>> hist_slope = calculate_slope(hist, period=5)
+        >>> print("상승 추세" if hist_slope.iloc[-1] > 0 else "하락 추세")
+    
+    Notes:
+        - 기울기 > 0: 우상향 (매수 신호 강화)
+        - 기울기 < 0: 우하향 (매도 신호 강화)
+        - 기울기 절댓값이 클수록 추세가 강함
+        - 3개 MACD 기울기가 모두 동일 방향이면 신뢰도 최대
+    """
+    try:
+        # 입력 검증
+        if not isinstance(series, pd.Series):
+            raise TypeError(f"series는 pd.Series여야 합니다. 현재: {type(series)}")
+        
+        if period < 2:
+            raise ValueError(f"period는 2 이상이어야 합니다. 현재: {period}")
+        
+        if len(series) < period:
+            raise ValueError(
+                f"데이터 길이({len(series)})가 부족합니다. "
+                f"최소 {period}개 필요합니다."
+            )
+        
+        # 기울기 계산을 위한 함수
+        def linear_regression_slope(y):
+            """주어진 윈도우에서 선형 회귀 기울기 계산"""
+            if len(y) < 2 or y.isna().all():
+                return np.nan
+            
+            # x: 0, 1, 2, ..., period-1
+            x = np.arange(len(y))
+            
+            # NaN 제거
+            mask = ~np.isnan(y)
+            if mask.sum() < 2:
+                return np.nan
+            
+            x_clean = x[mask]
+            y_clean = y[mask]
+            
+            # 선형 회귀: y = mx + b에서 m(기울기) 계산
+            # m = (n*Σxy - Σx*Σy) / (n*Σx² - (Σx)²)
+            n = len(x_clean)
+            sum_x = x_clean.sum()
+            sum_y = y_clean.sum()
+            sum_xy = (x_clean * y_clean).sum()
+            sum_x2 = (x_clean ** 2).sum()
+            
+            denominator = n * sum_x2 - sum_x ** 2
+            if denominator == 0:
+                return 0.0
+            
+            slope = (n * sum_xy - sum_x * sum_y) / denominator
+            
+            return slope
+        
+        # rolling window를 사용하여 각 시점의 기울기 계산
+        slopes = series.rolling(window=period, min_periods=period).apply(
+            linear_regression_slope, raw=False
+        )
+        
+        logger.debug(f"기울기 계산 완료: period={period}, {len(slopes)}개 값")
+        
+        return slopes
+    
+    except Exception as e:
+        logger.error(f"기울기 계산 중 오류 발생: {e}")
+        raise
+
+
+def check_direction(
+        series: pd.Series,
+        threshold: float = 0.0
+) -> pd.Series:
+    """
+    방향 판단 - 'up', 'down', 'neutral' 분류
+    
+    시계열 데이터의 방향을 판단하여 문자열로 반환합니다.
+    3개 MACD의 방향 일치 여부를 확인하는 데 사용됩니다.
+    
+    판단 기준:
+        - 'up': series > threshold (우상향)
+        - 'down': series < -threshold (우하향)
+        - 'neutral': |series| <= threshold (횡보)
+    
+    Args:
+        series (pd.Series): 방향을 판단할 시계열 데이터
+        threshold (float): 중립 판단 기준값 (기본값: 0.0)
+    
+    Returns:
+        pd.Series: 각 시점의 방향 ('up', 'down', 'neutral')
+    
+    Raises:
+        ValueError: threshold가 음수일 경우
+        TypeError: series가 pd.Series가 아닐 경우
+    
+    Examples:
+        >>> # MACD 방향 판단
+        >>> df = pd.DataFrame({'Close': [100, 102, 105, 103, 101]})
+        >>> macd, signal, hist = calculate_macd(df, fast=5, slow=10, signal=3)
+        >>> direction = check_direction(macd, threshold=0.0)
+        >>> print(direction.iloc[-1])  # 'up' or 'down' or 'neutral'
+        
+        >>> # 3개 MACD 방향 일치 확인
+        >>> triple_macd = calculate_triple_macd(df)
+        >>> dir_upper = check_direction(triple_macd['MACD_상'])
+        >>> dir_middle = check_direction(triple_macd['MACD_중'])
+        >>> dir_lower = check_direction(triple_macd['MACD_하'])
+        >>> 
+        >>> # 모두 'up'이면 강한 매수 신호
+        >>> all_up = (dir_upper == 'up') & (dir_middle == 'up') & (dir_lower == 'up')
+        >>> print(f"강한 매수 신호: {all_up.iloc[-1]}")
+    
+    Notes:
+        - 3개 MACD가 모두 'up': 강한 매수 신호
+        - 3개 MACD가 모두 'down': 강한 매도 신호
+        - 방향이 일치하지 않으면: 관망 또는 신중한 진입
+        - threshold를 크게 설정하면 더 확실한 방향만 감지
+    """
+    try:
+        # 입력 검증
+        if not isinstance(series, pd.Series):
+            raise TypeError(f"series는 pd.Series여야 합니다. 현재: {type(series)}")
+        
+        if threshold < 0:
+            raise ValueError(f"threshold는 0 이상이어야 합니다. 현재: {threshold}")
+        
+        # 방향 판단
+        direction = pd.Series('neutral', index=series.index)
+        
+        # 우상향
+        direction[series > threshold] = 'up'
+        
+        # 우하향
+        direction[series < -threshold] = 'down'
+        
+        # 통계 정보
+        up_count = (direction == 'up').sum()
+        down_count = (direction == 'down').sum()
+        neutral_count = (direction == 'neutral').sum()
+        
+        logger.debug(
+            f"방향 판단 완료: up={up_count}, down={down_count}, neutral={neutral_count}"
+        )
+        
+        return direction
+    
+    except Exception as e:
+        logger.error(f"방향 판단 중 오류 발생: {e}")
+        raise
+
+
+def calculate_all_indicators(
+        data: pd.DataFrame,
+        ema_periods: Tuple[int, int, int] = (5, 20, 40),
+        atr_period: int = 20,
+        peakout_lookback: int = 3,
+        slope_period: int = 5,
+        direction_threshold: float = 0.0
+) -> pd.DataFrame:
+    """
+    모든 기술적 지표를 DataFrame에 추가
+
+    이동평균선 투자법 전략에 필요한 모든 지표를 한 번에 계산하여
+    원본 DataFrame에 추가한 새로운 DataFrame을 반환합니다.
+
+    계산되는 지표:
+        1. EMA (5일, 20일, 40일)
+        2. MACD 3종 (MACD선, 시그널선, 히스토그램)
+           - MACD(상): 5|20|9
+           - MACD(중): 5|40|9
+           - MACD(하): 20|40|9
+        3. ATR (변동성 지표)
+        4. 피크아웃 (히스토그램, MACD선)
+        5. 기울기 (3종 MACD)
+        6. 방향성 (3종 MACD)
+
+    Args:
+        data (pd.DataFrame): OHLC 데이터 (Open, High, Low, Close, Volume 필요)
+        ema_periods (Tuple[int, int, int]): EMA 기간 (기본값: (5, 20, 40))
+        atr_period (int): ATR 계산 기간 (기본값: 20)
+        peakout_lookback (int): 피크아웃 감지 lookback 기간 (기본값: 3)
+        slope_period (int): 기울기 계산 기간 (기본값: 5)
+        direction_threshold (float): 방향 판단 threshold (기본값: 0.0)
+
+    Returns:
+        pd.DataFrame: 원본 데이터 + 모든 지표가 추가된 DataFrame
+
+    Raises:
+        ValueError: 필수 컬럼이 없거나 데이터 길이가 부족한 경우
+        TypeError: 데이터 타입이 올바르지 않은 경우
+
+    Examples:
+        >>> from src.data import get_stock_data
+        >>>
+        >>> # 데이터 수집
+        >>> df = get_stock_data('005930', period=100)
+        >>>
+        >>> # 모든 지표 계산
+        >>> df_with_indicators = calculate_all_indicators(df)
+        >>>
+        >>> # 결과 확인
+        >>> print(df_with_indicators.columns)
+        >>> print(df_with_indicators.tail())
+        >>>
+        >>> # 커스텀 설정
+        >>> df_custom = calculate_all_indicators(
+        ...     df,
+        ...     ema_periods=(10, 30, 60),
+        ...     atr_period=14,
+        ...     peakout_lookback=5
+        ... )
+
+    Notes:
+        - 최소 49일 이상의 데이터 필요 (MACD 계산 최소 요구사항)
+        - 초기 기간의 일부 지표는 NaN 값을 가짐
+        - 원본 DataFrame은 수정되지 않음 (복사본 생성)
+        - 계산 순서: 기본 지표 → MACD → 파생 지표
+    """
+    try:
+        # 입력 검증
+        if not isinstance(data, pd.DataFrame):
+            raise TypeError(f"data는 pd.DataFrame이어야 합니다. 현재: {type(data)}")
+
+        # 필수 컬럼 확인
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"필수 컬럼이 없습니다: {missing_columns}")
+
+        # 최소 데이터 길이 검증
+        min_length = 49  # MACD(중/하) 계산 최소 요구사항
+        if len(data) < min_length:
+            raise ValueError(
+                f"데이터 길이({len(data)})가 부족합니다. "
+                f"최소 {min_length}일 필요합니다."
+            )
+
+        # 원본 데이터 복사
+        result = data.copy()
+
+        logger.info("모든 기술적 지표 계산 시작...")
+
+        # 1. EMA 계산
+        logger.debug("EMA 계산 중...")
+        result['EMA_5'] = calculate_ema(data, period=ema_periods[0])
+        result['EMA_20'] = calculate_ema(data, period=ema_periods[1])
+        result['EMA_40'] = calculate_ema(data, period=ema_periods[2])
+
+        # 2. ATR 계산
+        logger.debug("ATR 계산 중...")
+        result['ATR'] = calculate_atr(data, period=atr_period)
+
+        # 3. MACD 3종 계산
+        logger.debug("MACD 3종 계산 중...")
+        triple_macd = calculate_triple_macd(data)
+        result = pd.concat([result, triple_macd], axis=1)
+
+        # 4. 피크아웃 감지
+        logger.debug("피크아웃 감지 중...")
+        # 히스토그램 피크아웃
+        hist_upper = result['Hist_상'].dropna()
+        if len(hist_upper) >= peakout_lookback + 1:
+            result['Peakout_Hist_상'] = detect_peakout(hist_upper, lookback=peakout_lookback)
+
+        hist_middle = result['Hist_중'].dropna()
+        if len(hist_middle) >= peakout_lookback + 1:
+            result['Peakout_Hist_중'] = detect_peakout(hist_middle, lookback=peakout_lookback)
+
+        hist_lower = result['Hist_하'].dropna()
+        if len(hist_lower) >= peakout_lookback + 1:
+            result['Peakout_Hist_하'] = detect_peakout(hist_lower, lookback=peakout_lookback)
+
+        # MACD선 피크아웃
+        macd_upper = result['MACD_상'].dropna()
+        if len(macd_upper) >= peakout_lookback + 1:
+            result['Peakout_MACD_상'] = detect_peakout(macd_upper, lookback=peakout_lookback)
+
+        macd_middle = result['MACD_중'].dropna()
+        if len(macd_middle) >= peakout_lookback + 1:
+            result['Peakout_MACD_중'] = detect_peakout(macd_middle, lookback=peakout_lookback)
+
+        macd_lower = result['MACD_하'].dropna()
+        if len(macd_lower) >= peakout_lookback + 1:
+            result['Peakout_MACD_하'] = detect_peakout(macd_lower, lookback=peakout_lookback)
+
+        # 5. 기울기 계산
+        logger.debug("기울기 계산 중...")
+        macd_upper_clean = result['MACD_상'].dropna()
+        if len(macd_upper_clean) >= slope_period:
+            result['Slope_MACD_상'] = calculate_slope(macd_upper_clean, period=slope_period)
+
+        macd_middle_clean = result['MACD_중'].dropna()
+        if len(macd_middle_clean) >= slope_period:
+            result['Slope_MACD_중'] = calculate_slope(macd_middle_clean, period=slope_period)
+
+        macd_lower_clean = result['MACD_하'].dropna()
+        if len(macd_lower_clean) >= slope_period:
+            result['Slope_MACD_하'] = calculate_slope(macd_lower_clean, period=slope_period)
+
+        # 6. 방향 판단
+        logger.debug("방향 판단 중...")
+        result['Dir_MACD_상'] = check_direction(result['MACD_상'], threshold=direction_threshold)
+        result['Dir_MACD_중'] = check_direction(result['MACD_중'], threshold=direction_threshold)
+        result['Dir_MACD_하'] = check_direction(result['MACD_하'], threshold=direction_threshold)
+
+        # 7. 통합 신호 생성
+        logger.debug("통합 신호 생성 중...")
+        # 3개 MACD 방향 일치 확인
+        all_up = (
+                (result['Dir_MACD_상'] == 'up') &
+                (result['Dir_MACD_중'] == 'up') &
+                (result['Dir_MACD_하'] == 'up')
+        )
+
+        all_down = (
+                (result['Dir_MACD_상'] == 'down') &
+                (result['Dir_MACD_중'] == 'down') &
+                (result['Dir_MACD_하'] == 'down')
+        )
+
+        result['Direction_Agreement'] = 'mixed'
+        result.loc[all_up, 'Direction_Agreement'] = 'all_up'
+        result.loc[all_down, 'Direction_Agreement'] = 'all_down'
+
+        logger.info(
+            f"모든 기술적 지표 계산 완료: "
+            f"{len(result)}행 × {len(result.columns)}열"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"지표 계산 중 오류 발생: {e}")
+        raise
