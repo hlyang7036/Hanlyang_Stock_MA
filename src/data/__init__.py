@@ -10,6 +10,7 @@ from .collector import (
     get_current_price,
     get_market_status,
     validate_data,
+    _normalize_dataframe,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     'get_current_price',
     'get_market_status',
     'validate_data',
+    '_normalize_dataframe',
 ]

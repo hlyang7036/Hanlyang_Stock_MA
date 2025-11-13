@@ -149,32 +149,88 @@ class TestGetRealTimeData:
 class TestGetStockData:
     """get_stock_data 함수 테스트"""
     
-    def test_get_stock_data_auto_recent(self):
-        """자동 선택 - 최근 데이터 (API) 테스트"""
+    def test_get_stock_data_default(self):
+        """기본 사용 - 최근 50일 (FDR) 테스트"""
         ticker = '005930'
-        # 최근 30일
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
         
-        df = get_stock_data(ticker, start_date, end_date, source='auto')
+        df = get_stock_data(ticker)
+        
+        # 검증
+        assert isinstance(df, pd.DataFrame)
+        assert not df.empty
+        assert list(df.columns) == ['Open', 'High', 'Low', 'Close', 'Volume']
+        assert isinstance(df.index, pd.DatetimeIndex)
+        # 약 50일치 데이터 (영업일 기준이므로 정확히 50일은 아님)
+        assert 30 <= len(df) <= 60
+    
+    def test_get_stock_data_with_days(self):
+        """days 파라미터 - 최근 N일 테스트"""
+        ticker = '005930'
+        days = 30
+        
+        df = get_stock_data(ticker, days=days)
+        
+        # 검증
+        assert isinstance(df, pd.DataFrame)
+        assert not df.empty
+        assert list(df.columns) == ['Open', 'High', 'Low', 'Close', 'Volume']
+        # 약 30일치 데이터 (영업일 기준)
+        assert 15 <= len(df) <= 40
+    
+    def test_get_stock_data_with_start_end_date(self):
+        """start_date/end_date - 명시적 기간 테스트"""
+        ticker = '005930'
+        start_date = '2024-01-01'
+        end_date = '2024-01-31'
+        
+        df = get_stock_data(ticker, start_date=start_date, end_date=end_date)
         
         # 검증
         assert isinstance(df, pd.DataFrame)
         assert not df.empty
         assert list(df.columns) == ['Open', 'High', 'Low', 'Close', 'Volume']
     
-    def test_get_stock_data_auto_historical(self):
-        """자동 선택 - 과거 데이터 (FDR) 테스트"""
+    def test_get_stock_data_long_period(self):
+        """장기 백테스팅 - FDR 자동 선택 테스트"""
         ticker = '005930'
         start_date = '2023-01-01'
         end_date = '2023-12-31'
         
-        df = get_stock_data(ticker, start_date, end_date, source='auto')
+        df = get_stock_data(ticker, start_date=start_date, end_date=end_date, source='auto')
         
         # 검증
         assert isinstance(df, pd.DataFrame)
         assert not df.empty
         assert list(df.columns) == ['Open', 'High', 'Low', 'Close', 'Volume']
+    
+    def test_get_stock_data_with_api_source(self):
+        """실시간 데이터 - API 명시 테스트"""
+        ticker = '005930'
+        days = 30
+        
+        df = get_stock_data(ticker, days=days, source='api')
+        
+        # 검증
+        assert isinstance(df, pd.DataFrame)
+        assert not df.empty
+        assert list(df.columns) == ['Open', 'High', 'Low', 'Close', 'Volume']
+    
+    def test_get_stock_data_days_and_start_date_error(self):
+        """days와 start_date 동시 사용 에러 테스트"""
+        ticker = '005930'
+        
+        with pytest.raises(ValueError, match="days와 start_date를 동시에 사용할 수 없습니다"):
+            get_stock_data(ticker, days=30, start_date='2024-01-01')
+    
+    def test_get_stock_data_invalid_days(self):
+        """잘못된 days 값 에러 테스트"""
+        ticker = '005930'
+        
+        with pytest.raises(ValueError, match="days는 1 이상이어야 합니다"):
+            get_stock_data(ticker, days=0)
+        
+        with pytest.raises(ValueError, match="days는 1 이상이어야 합니다"):
+            get_stock_data(ticker, days=-10)
 
 
 class TestGetMultipleStocks:

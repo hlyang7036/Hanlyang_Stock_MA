@@ -307,24 +307,36 @@ def get_real_time_data(
 
 def get_stock_data(
     ticker: str,
+    days: int = None,
     start_date: str = None,
     end_date: str = None,
-    period: str = 'D',
     source: str = 'auto'
 ) -> pd.DataFrame:
     """
     주가 데이터를 수집하는 통합 인터페이스입니다.
     
-    source='auto'일 때 날짜 범위에 따라 자동으로 소스를 선택합니다:
-    - 최근 100일 이내: HantuStock API 사용
-    - 그 이상: FinanceDataReader 사용
+    사용 방법:
+    1. days 파라미터: 최근 N일치 데이터 수집 (간편)
+    2. start_date/end_date: 명시적 기간 지정 (백테스팅)
+    3. days와 start_date 모두 None: 기본 50일
+    
+    source='auto'일 때:
+    - 기본적으로 FinanceDataReader 사용 (빠르고 안정적)
+    - 실시간 데이터 필요 시 source='api' 명시
     
     Args:
         ticker: 종목 코드 (예: '005930')
-        start_date: 시작일 (YYYY-MM-DD), None이면 100일 전
-        end_date: 종료일 (YYYY-MM-DD), None이면 오늘
-        period: 봉 주기 ('D'=일봉)
-        source: 데이터 소스 ('auto', 'api', 'fdr', 'pykrx')
+        days: 최근 N일치 데이터 (예: 50)
+            - None이면 start_date 기준 또는 기본값 50일
+        start_date: 시작일 (YYYY-MM-DD)
+            - days와 함께 사용 불가
+        end_date: 종료일 (YYYY-MM-DD)
+            - None이면 오늘
+        source: 데이터 소스
+            - 'auto': 자동 선택 (기본: FDR)
+            - 'api': HantuStock API (실시간)
+            - 'fdr': FinanceDataReader
+            - 'pykrx': pykrx 라이브러리
     
     Returns:
         정규화된 DataFrame (OHLCV)
@@ -334,28 +346,47 @@ def get_stock_data(
         Exception: 데이터 수집 실패
     
     Examples:
-        >>> # 자동 선택 (최근 100일)
+        >>> # 기본 사용 (최근 50일)
         >>> df = get_stock_data('005930')
         
-        >>> # 과거 데이터
-        >>> df = get_stock_data('005930', '2020-01-01', '2023-12-31')
+        >>> # 특정 일수
+        >>> df = get_stock_data('005930', days=100)
         
-        >>> # 특정 소스 지정
-        >>> df = get_stock_data('005930', source='fdr')
+        >>> # 백테스팅 (긴 기간)
+        >>> df = get_stock_data('005930', start_date='2020-01-01', end_date='2023-12-31')
+        
+        >>> # 실시간 데이터 필요 시
+        >>> df = get_stock_data('005930', days=50, source='api')
     """
     if not ticker:
         raise ValueError("종목 코드를 입력해주세요.")
+    
+    # 파라미터 검증
+    if days is not None and start_date is not None:
+        raise ValueError("days와 start_date를 동시에 사용할 수 없습니다.")
     
     # 기본값 설정
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
     
-    if start_date is None:
-        # 기본값: 100일 전
-        start = datetime.now() - timedelta(days=100)
+    # days 파라미터 처리
+    if days is not None:
+        if days <= 0:
+            raise ValueError("days는 1 이상이어야 합니다.")
+        
+        # 최근 N일 계산
+        start = datetime.now() - timedelta(days=days)
         start_date = start.strftime('%Y-%m-%d')
+        logger.info(f"최근 {days}일 데이터 수집: {ticker}")
     
-    logger.info(f"데이터 수집 시작: {ticker} ({start_date} ~ {end_date})")
+    # start_date가 없으면 기본값 50일
+    if start_date is None:
+        days = 50  # MACD 최소 49일 + 여유 1일
+        start = datetime.now() - timedelta(days=days)
+        start_date = start.strftime('%Y-%m-%d')
+        logger.info(f"기본 {days}일 데이터 수집: {ticker}")
+    
+    logger.info(f"데이터 수집: {ticker} ({start_date} ~ {end_date})")
     
     try:
         # 소스 자동 선택
@@ -365,22 +396,23 @@ def get_stock_data(
             end_dt = datetime.strptime(end_date, '%Y-%m-%d')
             days_diff = (end_dt - start_dt).days
             
-            # 100일 이내면 API, 이상이면 FDR
-            if days_diff <= 100:
-                source = 'api'
-                logger.info("자동 선택: API (최근 100일 이내)")
+            # 기본적으로 FDR 사용 (빠르고 안정적)
+            # 실시간이 필요하면 source='api' 명시해야 함
+            if days_diff <= 365:
+                source = 'fdr'
+                logger.info("자동 선택: FinanceDataReader (1년 이내)")
             else:
                 source = 'fdr'
-                logger.info("자동 선택: FinanceDataReader (100일 초과)")
+                logger.info("자동 선택: FinanceDataReader (장기)")
         
         # 소스별 데이터 수집
         if source == 'api':
-            # 날짜 차이 계산하여 count 결정
+            # 한투 API 사용
             start_dt = datetime.strptime(start_date, '%Y-%m-%d')
             end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-            count = max((end_dt - start_dt).days + 10, 100)  # 여유있게
+            count = (end_dt - start_dt).days + 10  # 여유있게
             
-            df = get_real_time_data(ticker, period, count)
+            df = get_real_time_data(ticker, 'D', count)
             
             # 날짜 범위 필터링
             df = df.loc[start_date:end_date]
@@ -390,6 +422,10 @@ def get_stock_data(
             
         else:
             raise ValueError(f"지원하지 않는 소스: {source}")
+        
+        # 데이터 최종 검증
+        if df is None or df.empty:
+            raise ValueError("데이터 수집 결과가 비어있습니다.")
         
         logger.info(f"데이터 수집 완료: {len(df)}개 행")
         return df
