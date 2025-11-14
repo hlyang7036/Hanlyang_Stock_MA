@@ -470,6 +470,7 @@ def calculate_triple_macd(
 
 def detect_peakout(
         series: pd.Series,
+        direction: str = 'both',
         lookback: int = 3
 ) -> pd.Series:
     """
@@ -484,27 +485,35 @@ def detect_peakout(
     
     Args:
         series (pd.Series): MACD선, 히스토그램 등의 시계열 데이터
+        direction (str): 감지할 피크아웃 방향 (기본값: 'both')
+            - 'both': 고점/저점 피크아웃 모두 감지
+            - 'down': 고점 피크아웃만 감지 (하락 전환)
+            - 'up': 저점 피크아웃만 감지 (상승 전환)
         lookback (int): 피크아웃 감지를 위한 lookback 기간 (기본값: 3)
     
     Returns:
-        pd.Series: 피크아웃 신호
-            - 1: 고점 피크아웃 (상승 후 하락 전환)
-            - -1: 저점 피크아웃 (하락 후 상승 전환)
-            - 0: 피크아웃 없음
+        pd.Series: 피크아웃 신호 (boolean)
+            - direction='both': 1 (고점), -1 (저점), 0 (없음)
+            - direction='down': True (고점 피크아웃), False (없음)
+            - direction='up': True (저점 피크아웃), False (없음)
     
     Raises:
-        ValueError: lookback이 1보다 작을 경우
+        ValueError: lookback이 1보다 작거나 direction이 잘못된 경우
         TypeError: series가 pd.Series가 아닐 경우
     
     Examples:
-        >>> # 히스토그램 피크아웃 감지
+        >>> # 히스토그램 피크아웃 감지 (양방향)
         >>> df = pd.DataFrame({'Close': [100, 102, 105, 103, 101, 99, 101, 103]})
         >>> macd, signal, hist = calculate_macd(df, fast=5, slow=10, signal=3)
-        >>> peakout = detect_peakout(hist, lookback=3)
+        >>> peakout = detect_peakout(hist, direction='both', lookback=3)
         >>> print(peakout[peakout != 0])  # 피크아웃 지점만 출력
         
-        >>> # MACD선 피크아웃 감지
-        >>> macd_peakout = detect_peakout(macd, lookback=3)
+        >>> # 하락 피크아웃만 감지 (매수 포지션 청산용)
+        >>> down_peakout = detect_peakout(hist, direction='down', lookback=3)
+        >>> print(down_peakout[down_peakout])  # True인 지점만
+        
+        >>> # 상승 피크아웃만 감지 (매도 포지션 청산용)
+        >>> up_peakout = detect_peakout(hist, direction='up', lookback=3)
     
     Notes:
         - 히스토그램 피크아웃: 경계 태세 (청산 1단계)
@@ -517,6 +526,9 @@ def detect_peakout(
         if not isinstance(series, pd.Series):
             raise TypeError(f"series는 pd.Series여야 합니다. 현재: {type(series)}")
         
+        if direction not in ['both', 'down', 'up']:
+            raise ValueError(f"direction은 'both', 'down', 'up' 중 하나여야 합니다: {direction}")
+        
         if lookback < 1:
             raise ValueError(f"lookback은 1 이상이어야 합니다. 현재: {lookback}")
         
@@ -526,35 +538,50 @@ def detect_peakout(
                 f"최소 {lookback + 1}개 필요합니다."
             )
         
-        # 결과 시리즈 초기화
-        peakout = pd.Series(0, index=series.index)
-        
-        # lookback 기간 동안의 최댓값/최솟값 계산
+        # lookback 기간 동안의 최댓값/최솟값 계산 (현재 포함)
         rolling_max = series.rolling(window=lookback + 1, min_periods=lookback + 1).max()
         rolling_min = series.rolling(window=lookback + 1, min_periods=lookback + 1).min()
         
         # 고점 피크아웃 감지
-        # 조건: 현재 값이 최댓값보다 작고, 최댓값이 lookback 기간 전에 발생
-        is_high_peakout = (
-            (series < rolling_max) &  # 현재 값 < 최댓값
-            (series.shift(1) == rolling_max.shift(1))  # 직전이 최고점
-        )
+        # 조건: 직전 값이 윈도우의 최고점이고, 현재 하락
+        prev_value = series.shift(1)
+        prev_is_peak = prev_value == rolling_max
+        is_declining = series < prev_value
+        is_high_peakout = prev_is_peak & is_declining
         
         # 저점 피크아웃 감지
-        # 조건: 현재 값이 최솟값보다 크고, 최솟값이 lookback 기간 전에 발생
-        is_low_peakout = (
-            (series > rolling_min) &  # 현재 값 > 최솟값
-            (series.shift(1) == rolling_min.shift(1))  # 직전이 최저점
-        )
+        # 조건: 직전 값이 윈도우의 최저점이고, 현재 상승
+        prev_is_trough = prev_value == rolling_min
+        is_rising = series > prev_value
+        is_low_peakout = prev_is_trough & is_rising
         
-        # 피크아웃 신호 설정
-        peakout[is_high_peakout] = 1   # 고점 피크아웃
-        peakout[is_low_peakout] = -1   # 저점 피크아웃
-        
-        logger.debug(
-            f"피크아웃 감지 완료: "
-            f"고점 {is_high_peakout.sum()}개, 저점 {is_low_peakout.sum()}개"
-        )
+        # direction에 따라 결과 생성
+        if direction == 'both':
+            # 양방향: 1, -1, 0 형식
+            peakout = pd.Series(0, index=series.index)
+            peakout[is_high_peakout] = 1   # 고점 피크아웃
+            peakout[is_low_peakout] = -1   # 저점 피크아웃
+            
+            logger.debug(
+                f"피크아웃 감지 완료 (both): "
+                f"고점 {is_high_peakout.sum()}개, 저점 {is_low_peakout.sum()}개"
+            )
+        elif direction == 'down':
+            # 하락 피크아웃만: boolean
+            peakout = is_high_peakout
+            
+            logger.debug(
+                f"피크아웃 감지 완료 (down): "
+                f"고점 {is_high_peakout.sum()}개"
+            )
+        else:  # direction == 'up'
+            # 상승 피크아웃만: boolean
+            peakout = is_low_peakout
+            
+            logger.debug(
+                f"피크아웃 감지 완료 (up): "
+                f"저점 {is_low_peakout.sum()}개"
+            )
         
         return peakout
     
