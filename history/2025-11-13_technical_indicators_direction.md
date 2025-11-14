@@ -72,7 +72,7 @@ Level 2 공통 모듈 중 3단계인 방향성 분석 함수(detect_peakout, cal
 ---
 
 ### 2. 테스트 코드
-**경로**: `src/tests/test_indicators.py`
+**경로**: `src/tests/analysis/technical/test_indicators.py`
 
 #### 추가된 테스트 클래스 (4개, 총 24개 테스트)
 
@@ -110,7 +110,7 @@ Level 2 공통 모듈 중 3단계인 방향성 분석 함수(detect_peakout, cal
 
 #### 테스트 결과
 ```bash
-$ pytest src/tests/test_indicators.py -v
+$ pytest src/tests/analysis/technical/test_indicators.py -v
 
 ✅ 59 passed in 1.23s
 

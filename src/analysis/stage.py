@@ -15,7 +15,7 @@ Functions:
 
 import pandas as pd
 import numpy as np
-from typing import Union, Dict, Optional
+from typing import Union, Dict, Optional, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -415,3 +415,323 @@ def detect_stage_transition(data: pd.DataFrame) -> pd.Series:
     logger.debug("스테이지 전환 감지 완료")
     
     return transition.astype('Int64')  # nullable integer
+
+
+def calculate_ma_spread(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    이동평균선 간격 계산
+    
+    3개 이동평균선(5일, 20일, 40일) 간의 간격을 계산합니다.
+    간격의 크기와 방향(양수/음수)으로 추세 강도와 배열 상태를 파악할 수 있습니다.
+    
+    Args:
+        data: DataFrame (EMA_5, EMA_20, EMA_40 컬럼 필요)
+    
+    Returns:
+        pd.DataFrame: 3개 컬럼
+            Spread_5_20: 단기-중기 간격 (EMA_5 - EMA_20)
+            Spread_20_40: 중기-장기 간격 (EMA_20 - EMA_40)
+            Spread_5_40: 단기-장기 간격 (EMA_5 - EMA_40)
+    
+    Raises:
+        TypeError: data가 DataFrame이 아닐 때
+        ValueError: 필수 컬럼이 없을 때
+    
+    Examples:
+        >>> df = pd.DataFrame({
+        ...     'EMA_5': [110, 115, 120],
+        ...     'EMA_20': [105, 108, 112],
+        ...     'EMA_40': [100, 102, 105]
+        ... })
+        >>> spreads = calculate_ma_spread(df)
+        >>> print(spreads['Spread_5_20'])
+        0    5
+        1    7
+        2    8
+        dtype: float64
+    """
+    # 입력 검증
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError(f"DataFrame이 필요합니다. 입력 타입: {type(data)}")
+    
+    required_columns = ['EMA_5', 'EMA_20', 'EMA_40']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise ValueError(f"필수 컬럼이 없습니다: {missing_columns}")
+    
+    logger.debug(f"이동평균선 간격 계산 시작: {len(data)}개 데이터")
+    
+    # 간격 계산 (단순 뺄셈)
+    spreads = pd.DataFrame(index=data.index)
+    
+    spreads['Spread_5_20'] = data['EMA_5'] - data['EMA_20']
+    spreads['Spread_20_40'] = data['EMA_20'] - data['EMA_40']
+    spreads['Spread_5_40'] = data['EMA_5'] - data['EMA_40']
+    
+    # 통계 로깅
+    logger.debug(f"Spread_5_20 평균: {spreads['Spread_5_20'].mean():.2f}")
+    logger.debug(f"Spread_20_40 평균: {spreads['Spread_20_40'].mean():.2f}")
+    logger.debug(f"Spread_5_40 평균: {spreads['Spread_5_40'].mean():.2f}")
+    
+    logger.debug("이동평균선 간격 계산 완료")
+    
+    return spreads
+
+
+def check_ma_slope(data: pd.DataFrame, period: int = 5) -> pd.DataFrame:
+    """
+    이동평균선 기울기 확인
+    
+    3개 이동평균선(5일, 20일, 40일)의 기울기를 계산합니다.
+    기울기를 통해 각 이동평균선의 방향성(우상향/평행/우하향)을 판단할 수 있습니다.
+    
+    Args:
+        data: DataFrame (EMA_5, EMA_20, EMA_40 컬럼 필요)
+        period: 기울기 계산 기간 (기본값: 5)
+    
+    Returns:
+        pd.DataFrame: 3개 컬럼
+            Slope_EMA_5: 단기선 기울기
+            Slope_EMA_20: 중기선 기울기
+            Slope_EMA_40: 장기선 기울기
+    
+    Raises:
+        TypeError: data가 DataFrame이 아닐 때
+        ValueError: 필수 컬럼 없거나 period가 2 미만일 때
+    
+    Notes:
+        - Level 2의 calculate_slope() 함수를 재사용합니다
+        - 기울기 > 0: 우상향 (상승 추세)
+        - 기울기 ≈ 0: 평행 (추세 전환 임박)
+        - 기울기 < 0: 우하향 (하락 추세)
+    
+    Examples:
+        >>> df = pd.DataFrame({
+        ...     'EMA_5': [100, 102, 105, 109, 114],
+        ...     'EMA_20': [95, 97, 99, 102, 105],
+        ...     'EMA_40': [90, 91, 93, 95, 97]
+        ... })
+        >>> slopes = check_ma_slope(df, period=3)
+        >>> print(slopes['Slope_EMA_5'].iloc[-1] > 0)
+        True
+    """
+    # 입력 검증
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError(f"DataFrame이 필요합니다. 입력 타입: {type(data)}")
+    
+    required_columns = ['EMA_5', 'EMA_20', 'EMA_40']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise ValueError(f"필수 컬럼이 없습니다: {missing_columns}")
+    
+    if period < 2:
+        raise ValueError(f"period는 2 이상이어야 합니다. 입력값: {period}")
+    
+    logger.debug(f"이동평균선 기울기 계산 시작: {len(data)}개, period={period}")
+    
+    # 각 이동평균선의 기울기 계산
+    slopes = pd.DataFrame(index=data.index)
+    
+    # Level 2에서 구현한 calculate_slope 재사용
+    from src.analysis.technical.indicators import calculate_slope
+    
+    slopes['Slope_EMA_5'] = calculate_slope(data['EMA_5'], period=period)
+    slopes['Slope_EMA_20'] = calculate_slope(data['EMA_20'], period=period)
+    slopes['Slope_EMA_40'] = calculate_slope(data['EMA_40'], period=period)
+    
+    # 기울기 통계
+    for col in ['Slope_EMA_5', 'Slope_EMA_20', 'Slope_EMA_40']:
+        slope_mean = slopes[col].mean()
+        slope_std = slopes[col].std()
+        logger.debug(f"{col}: 평균={slope_mean:.4f}, 표준편차={slope_std:.4f}")
+    
+    logger.debug("이동평균선 기울기 계산 완료")
+    
+    return slopes
+
+
+def get_stage_strategy(
+    stage: int,
+    macd_directions: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    스테이지별 권장 전략 제공
+    
+    각 스테이지에 맞는 구체적인 매매 전략과 액션을 제공합니다.
+    MACD 방향 정보를 추가로 제공하면 신호 강도를 함께 분석합니다.
+    
+    Args:
+        stage: 현재 스테이지 (1~6)
+        macd_directions: 3개 MACD 방향 (선택)
+            예: {'상': 'up', '중': 'up', '하': 'up'}
+    
+    Returns:
+        Dict: 전략 정보
+            - stage: 스테이지 번호 (int)
+            - name: 스테이지 이름 (str)
+            - market_phase: 시장 국면 (str)
+            - strategy: 권장 전략 (str)
+            - action: 구체적 액션 (str)
+            - position_size: 포지션 크기 (str)
+            - risk_level: 리스크 레벨 (str)
+            - description: 상세 설명 (str)
+            - key_points: 핵심 포인트 리스트 (List[str])
+            - macd_directions: MACD 방향 정보 (Dict, 선택)
+            - macd_alignment: MACD 일치도 (Dict, 선택)
+    
+    Raises:
+        TypeError: stage가 정수가 아닐 때
+        ValueError: stage가 1~6 범위 밖일 때
+    
+    Examples:
+        >>> strategy = get_stage_strategy(1)
+        >>> print(strategy['name'])
+        안정 상승기
+        >>> print(strategy['action'])
+        buy
+        
+        >>> # MACD 방향 포함
+        >>> macd_dirs = {'상': 'up', '중': 'up', '하': 'up'}
+        >>> strategy = get_stage_strategy(1, macd_directions=macd_dirs)
+        >>> print(strategy['macd_alignment']['strength'])
+        strong
+    """
+    # 입력 검증
+    if not isinstance(stage, (int, np.integer)):
+        raise TypeError(f"stage는 정수여야 합니다. 입력 타입: {type(stage)}")
+    
+    if stage < 1 or stage > 6:
+        raise ValueError(f"stage는 1~6 사이여야 합니다. 입력값: {stage}")
+    
+    logger.debug(f"스테이지 {stage} 전략 조회")
+    
+    # 스테이지별 전략 매핑 (딕셔너리)
+    strategies = {
+        1: {
+            'stage': 1,
+            'name': '안정 상승기',
+            'market_phase': '강세장',
+            'strategy': '공격적 매수',
+            'action': 'buy',
+            'position_size': '적극적 (80-100%)',
+            'risk_level': 'low',
+            'description': '완전 정배열, 강한 상승 추세. 매수 포지션 확대 최적기',
+            'key_points': [
+                '3개 이동평균선 모두 우상향',
+                '이동평균선 간격 확대 중',
+                '매수 포지션 확대 적기',
+                'MACD(하) 골든크로스로 상승 확정',
+                '추세 지속 기대'
+            ]
+        },
+        2: {
+            'stage': 2,
+            'name': '하락 변화기1',
+            'market_phase': '약세 전환 초기',
+            'strategy': '포지션 유지 판단',
+            'action': 'hold_or_exit',
+            'position_size': '유지 또는 축소 (50-80%)',
+            'risk_level': 'medium',
+            'description': 'MACD(상) 데드크로스 발생. 단기선이 중기선 아래로 하락',
+            'key_points': [
+                '단기선이 중기선 아래로 하락',
+                'MACD(상) 데드크로스 (주의 신호)',
+                '중기-장기 간격 확인 필요',
+                '장기선이 여전히 상승 중이면 유지',
+                '장기선이 꺾이면 청산 검토'
+            ]
+        },
+        3: {
+            'stage': 3,
+            'name': '하락 변화기2',
+            'market_phase': '약세 가속',
+            'strategy': '매수 청산, 매도 진입',
+            'action': 'sell_or_short',
+            'position_size': '전량 청산 또는 매도 진입',
+            'risk_level': 'high',
+            'description': 'MACD(중) 데드크로스. 단기선이 장기선 아래로 하락',
+            'key_points': [
+                '단기선이 장기선 아래로 하락',
+                'MACD(중) 데드크로스 (강한 하락 신호)',
+                '매수 포지션 전량 청산',
+                '공격적 투자자는 매도 진입 고려',
+                '하락 추세 시작'
+            ]
+        },
+        4: {
+            'stage': 4,
+            'name': '안정 하락기',
+            'market_phase': '약세장',
+            'strategy': '공격적 매도 (또는 관망)',
+            'action': 'short_or_wait',
+            'position_size': '적극적 매도 (또는 현금 보유)',
+            'risk_level': 'low',
+            'description': '완전 역배열, 강한 하락 추세. 매도 포지션 확대 적기',
+            'key_points': [
+                '3개 이동평균선 모두 우하향',
+                '이동평균선 간격 확대 중 (역방향)',
+                '매도 포지션 확대 적기 (공격적 투자자)',
+                'MACD(하) 데드크로스로 하락 확정',
+                '보수적 투자자는 현금 보유 관망'
+            ]
+        },
+        5: {
+            'stage': 5,
+            'name': '상승 변화기1',
+            'market_phase': '강세 전환 초기',
+            'strategy': '포지션 유지 판단',
+            'action': 'hold_or_exit',
+            'position_size': '유지 또는 축소 (50-80%)',
+            'risk_level': 'medium',
+            'description': 'MACD(상) 골든크로스 발생. 단기선이 중기선 위로 상승',
+            'key_points': [
+                '단기선이 중기선 위로 상승',
+                'MACD(상) 골든크로스 (긍정 신호)',
+                '중기-장기 간격 확인 필요',
+                '장기선이 여전히 하락 중이면 유지',
+                '장기선이 반등하면 청산 검토'
+            ]
+        },
+        6: {
+            'stage': 6,
+            'name': '상승 변화기2',
+            'market_phase': '강세 가속',
+            'strategy': '매도 청산, 매수 진입',
+            'action': 'cover_or_buy',
+            'position_size': '전량 청산 또는 매수 진입',
+            'risk_level': 'high',
+            'description': 'MACD(중) 골든크로스. 단기선이 장기선 위로 상승',
+            'key_points': [
+                '단기선이 장기선 위로 상승',
+                'MACD(중) 골든크로스 (강한 상승 신호)',
+                '매도 포지션 전량 청산',
+                '조기 매수 진입 고려',
+                '상승 추세 시작 임박'
+            ]
+        }
+    }
+    
+    # 해당 스테이지 전략 가져오기
+    strategy = strategies[stage].copy()
+    
+    # MACD 방향 정보 추가 (선택)
+    if macd_directions is not None:
+        strategy['macd_directions'] = macd_directions
+        
+        # MACD 방향 일치도 계산
+        up_count = sum(1 for d in macd_directions.values() if d == 'up')
+        down_count = sum(1 for d in macd_directions.values() if d == 'down')
+        neutral_count = sum(1 for d in macd_directions.values() if d == 'neutral')
+        
+        strategy['macd_alignment'] = {
+            'up_count': up_count,
+            'down_count': down_count,
+            'neutral_count': neutral_count,
+            'strength': 'strong' if (up_count == 3 or down_count == 3) else 'weak'
+        }
+        
+        logger.debug(f"MACD 방향: 상승={up_count}, 하락={down_count}, 중립={neutral_count}")
+    
+    logger.debug(f"전략 조회 완료: {strategy['name']}")
+    
+    return strategy

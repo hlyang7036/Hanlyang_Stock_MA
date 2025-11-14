@@ -44,7 +44,7 @@ Date
 ```
 
 ### 1.2 테스트 코드 작성
-**경로**: `src/tests/test_collector.py`
+**경로**: `src/tests/data/test_collector.py`
 
 #### 테스트 클래스 (8개)
 - `TestNormalizeDataFrame` - 정규화 함수 (2개 테스트)
@@ -272,7 +272,7 @@ src/
 ## 테스트 결과
 
 ```bash
-$ pytest src/tests/test_collector.py -v
+$ pytest src/tests/data/test_collector.py -v
 
 TestNormalizeDataFrame::test_normalize_fdr_format ✅
 TestNormalizeDataFrame::test_normalize_pykrx_format ✅

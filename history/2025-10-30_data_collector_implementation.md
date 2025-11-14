@@ -65,7 +65,7 @@ Date
 ---
 
 ### 2. 테스트 코드 작성
-`src/tests/test_collector.py` - 성공 케이스 테스트
+`src/tests/data/test_collector.py` - 성공 케이스 테스트
 
 #### 테스트 클래스 구조
 ```python
@@ -102,10 +102,10 @@ TestGetMarketStatus           # 장 상태 확인 테스트
 **테스트 실행 방법**:
 ```bash
 # 전체 테스트
-pytest src/tests/test_collector.py -v
+pytest src/tests//data/test_collector.py -v
 
 # 특정 클래스만
-pytest src/tests/test_collector.py::TestGetStockData -v
+pytest src/tests/data/test_collector.py::TestGetStockData -v
 ```
 
 ---
@@ -195,7 +195,7 @@ src/
 ## 테스트 결과
 
 ```bash
-$ pytest src/tests/test_collector.py -v
+$ pytest src/tests/data/test_collector.py -v
 
 test_collector.py::TestNormalizeDataFrame::test_normalize_fdr_format ✅
 test_collector.py::TestNormalizeDataFrame::test_normalize_pykrx_format ✅

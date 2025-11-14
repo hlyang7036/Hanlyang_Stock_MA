@@ -59,7 +59,7 @@ Level 2 공통 모듈 중 2단계인 MACD 계산 함수(calculate_macd, calculat
 ---
 
 ### 2. 테스트 코드
-**경로**: `src/tests/test_indicators.py`
+**경로**: `src/tests/analysis/technical/test_indicators.py`
 
 #### 추가된 테스트 클래스 (3개, 총 16개 테스트)
 

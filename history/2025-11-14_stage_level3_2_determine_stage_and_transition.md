@@ -325,7 +325,7 @@ def test_transition_invalid_type(self):
 ### ✅ 전체 테스트 통과
 
 ```bash
-pytest src/tests/test_stage.py -v
+pytest src/tests/analysis/test_stage.py -v
 ```
 
 **결과**: 35개 테스트 모두 통과 ✅

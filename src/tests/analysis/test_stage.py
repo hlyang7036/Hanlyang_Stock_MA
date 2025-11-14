@@ -15,7 +15,10 @@ from src.analysis.stage import (
     determine_ma_arrangement,
     detect_macd_zero_cross,
     determine_stage,
-    detect_stage_transition
+    detect_stage_transition,
+    calculate_ma_spread,
+    check_ma_slope,
+    get_stage_strategy
 )
 
 
@@ -520,3 +523,296 @@ class TestDetectStageTransition:
         """에러: 잘못된 타입"""
         with pytest.raises(TypeError, match="DataFrame이 필요합니다"):
             detect_stage_transition([1, 2, 3])
+
+class TestCalculateMaSpread:
+    """calculate_ma_spread() 함수 테스트"""
+
+    def test_spread_calculation(self):
+        """간격 계산 정확성"""
+        df = pd.DataFrame({
+            'EMA_5': [110, 115, 120],
+            'EMA_20': [105, 108, 112],
+            'EMA_40': [100, 102, 105]
+        })
+
+        spreads = calculate_ma_spread(df)
+
+        # Spread_5_20 확인
+        assert spreads['Spread_5_20'].iloc[0] == 5  # 110 - 105
+        assert spreads['Spread_5_20'].iloc[1] == 7  # 115 - 108
+        assert spreads['Spread_5_20'].iloc[2] == 8  # 120 - 112
+
+        # Spread_20_40 확인
+        assert spreads['Spread_20_40'].iloc[0] == 5  # 105 - 100
+
+        # Spread_5_40 확인
+        assert spreads['Spread_5_40'].iloc[0] == 10  # 110 - 100
+
+        # 3개 컬럼 존재
+        assert len(spreads.columns) == 3
+
+    def test_spread_positive_negative(self):
+        """양수(정배열)/음수(역배열) 간격"""
+        df = pd.DataFrame({
+            'EMA_5': [110, 95],  # 정배열 → 역배열
+            'EMA_20': [105, 100],
+            'EMA_40': [100, 105]
+        })
+
+        spreads = calculate_ma_spread(df)
+
+        # 첫 행: 정배열 (양수)
+        assert spreads['Spread_5_20'].iloc[0] > 0
+        assert spreads['Spread_20_40'].iloc[0] > 0
+        assert spreads['Spread_5_40'].iloc[0] > 0
+
+        # 둘째 행: 역배열 (음수)
+        assert spreads['Spread_5_20'].iloc[1] < 0
+        assert spreads['Spread_20_40'].iloc[1] < 0
+        assert spreads['Spread_5_40'].iloc[1] < 0
+
+    def test_spread_change_tracking(self):
+        """간격 확대/축소 추적"""
+        df = pd.DataFrame({
+            'EMA_5': [110, 112, 115],  # 간격 확대
+            'EMA_20': [105, 106, 107],
+            'EMA_40': [100, 101, 102]
+        })
+
+        spreads = calculate_ma_spread(df)
+
+        # Spread_5_20 확대 확인
+        assert spreads['Spread_5_20'].iloc[0] == 5
+        assert spreads['Spread_5_20'].iloc[1] == 6
+        assert spreads['Spread_5_20'].iloc[2] == 8
+
+        # 간격이 계속 확대됨
+        assert spreads['Spread_5_20'].is_monotonic_increasing
+
+    def test_spread_with_nan(self):
+        """NaN 포함 시 전파"""
+        df = pd.DataFrame({
+            'EMA_5': [110, np.nan, 120],
+            'EMA_20': [105, 108, 112],
+            'EMA_40': [100, 102, 105]
+        })
+
+        spreads = calculate_ma_spread(df)
+
+        # NaN은 전파됨
+        assert not pd.isna(spreads['Spread_5_20'].iloc[0])
+        assert pd.isna(spreads['Spread_5_20'].iloc[1])
+        assert not pd.isna(spreads['Spread_5_20'].iloc[2])
+
+    def test_spread_missing_columns(self):
+        """필수 컬럼 누락"""
+        df = pd.DataFrame({
+            'EMA_5': [110, 115],
+            'EMA_20': [105, 108]
+            # EMA_40 누락
+        })
+
+        with pytest.raises(ValueError, match="필수 컬럼이 없습니다"):
+            calculate_ma_spread(df)
+
+    def test_spread_invalid_type(self):
+        """잘못된 타입"""
+        with pytest.raises(TypeError, match="DataFrame이 필요합니다"):
+            calculate_ma_spread([1, 2, 3])
+
+
+class TestCheckMaSlope:
+    """check_ma_slope() 함수 테스트"""
+
+    def test_slope_uptrend(self):
+        """우상향 기울기 판단"""
+        df = pd.DataFrame({
+            'EMA_5': [100, 102, 105, 109, 114],  # 증가
+            'EMA_20': [95, 97, 99, 102, 105],
+            'EMA_40': [90, 91, 93, 95, 97]
+        })
+
+        slopes = check_ma_slope(df, period=3)
+
+        # 모든 기울기가 양수
+        assert slopes['Slope_EMA_5'].iloc[-1] > 0
+        assert slopes['Slope_EMA_20'].iloc[-1] > 0
+        assert slopes['Slope_EMA_40'].iloc[-1] > 0
+
+        # 3개 컬럼 존재
+        assert len(slopes.columns) == 3
+
+    def test_slope_downtrend(self):
+        """우하향 기울기 판단"""
+        df = pd.DataFrame({
+            'EMA_5': [114, 109, 105, 102, 100],  # 감소
+            'EMA_20': [105, 102, 99, 97, 95],
+            'EMA_40': [97, 95, 93, 91, 90]
+        })
+
+        slopes = check_ma_slope(df, period=3)
+
+        # 모든 기울기가 음수
+        assert slopes['Slope_EMA_5'].iloc[-1] < 0
+        assert slopes['Slope_EMA_20'].iloc[-1] < 0
+        assert slopes['Slope_EMA_40'].iloc[-1] < 0
+
+    def test_slope_flat(self):
+        """평행 기울기 판단"""
+        df = pd.DataFrame({
+            'EMA_5': [100, 100.1, 99.9, 100.2, 100],  # 거의 변화 없음
+            'EMA_20': [95, 95.1, 94.9, 95.1, 95],
+            'EMA_40': [90, 90.05, 89.95, 90.1, 90]
+        })
+
+        slopes = check_ma_slope(df, period=3)
+
+        # 기울기가 0에 가까움
+        assert abs(slopes['Slope_EMA_5'].iloc[-1]) < 0.1
+        assert abs(slopes['Slope_EMA_20'].iloc[-1]) < 0.1
+        assert abs(slopes['Slope_EMA_40'].iloc[-1]) < 0.1
+
+    def test_slope_custom_period(self):
+        """커스텀 period 테스트"""
+        # 비선형 데이터 사용 (가속하는 패턴)
+        df = pd.DataFrame({
+            'EMA_5': [100, 101, 103, 106, 110, 115, 121, 128, 136, 145],   # 가속 증가
+            'EMA_20': [95, 96, 97, 99, 101, 104, 107, 111, 116, 122],     # 가속 증가
+            'EMA_40': [90, 91, 92, 93, 95, 97, 99, 102, 105, 109]         # 가속 증가
+        })
+
+
+        # period=3과 period=5 비교
+        slopes_3 = check_ma_slope(df, period=3)
+        slopes_5 = check_ma_slope(df, period=5)
+
+        # 둘 다 양수이지만 값은 다름
+        assert slopes_3['Slope_EMA_5'].iloc[-1] > 0
+        assert slopes_5['Slope_EMA_5'].iloc[-1] > 0
+        assert slopes_3['Slope_EMA_5'].iloc[-1] != slopes_5['Slope_EMA_5'].iloc[-1]
+
+    def test_slope_invalid_period(self):
+        """잘못된 period"""
+        df = pd.DataFrame({
+            'EMA_5': [100, 102],
+            'EMA_20': [95, 97],
+            'EMA_40': [90, 91]
+        })
+
+        with pytest.raises(ValueError, match="period는 2 이상"):
+            check_ma_slope(df, period=1)
+
+    def test_slope_missing_columns(self):
+        """필수 컬럼 누락"""
+        df = pd.DataFrame({
+            'EMA_5': [100, 102],
+            'EMA_20': [95, 97]
+            # EMA_40 누락
+        })
+
+        with pytest.raises(ValueError, match="필수 컬럼이 없습니다"):
+            check_ma_slope(df, period=3)
+
+
+class TestGetStageStrategy:
+    """get_stage_strategy() 함수 테스트"""
+
+    def test_strategy_stage_1(self):
+        """제1스테이지 전략"""
+        strategy = get_stage_strategy(1)
+
+        assert strategy['stage'] == 1
+        assert strategy['name'] == '안정 상승기'
+        assert strategy['market_phase'] == '강세장'
+        assert strategy['action'] == 'buy'
+        assert strategy['risk_level'] == 'low'
+        assert len(strategy['key_points']) == 5
+        assert 'description' in strategy
+
+    def test_strategy_stage_2(self):
+        """제2스테이지 전략"""
+        strategy = get_stage_strategy(2)
+
+        assert strategy['stage'] == 2
+        assert strategy['name'] == '하락 변화기1'
+        assert strategy['action'] == 'hold_or_exit'
+        assert strategy['risk_level'] == 'medium'
+
+    def test_strategy_stage_3(self):
+        """제3스테이지 전략"""
+        strategy = get_stage_strategy(3)
+
+        assert strategy['stage'] == 3
+        assert strategy['name'] == '하락 변화기2'
+        assert strategy['action'] == 'sell_or_short'
+        assert strategy['risk_level'] == 'high'
+
+    def test_strategy_stage_4(self):
+        """제4스테이지 전략"""
+        strategy = get_stage_strategy(4)
+
+        assert strategy['stage'] == 4
+        assert strategy['name'] == '안정 하락기'
+        assert strategy['action'] == 'short_or_wait'
+        assert strategy['risk_level'] == 'low'
+
+    def test_strategy_stage_5(self):
+        """제5스테이지 전략"""
+        strategy = get_stage_strategy(5)
+
+        assert strategy['stage'] == 5
+        assert strategy['name'] == '상승 변화기1'
+        assert strategy['action'] == 'hold_or_exit'
+        assert strategy['risk_level'] == 'medium'
+
+    def test_strategy_stage_6(self):
+        """제6스테이지 전략"""
+        strategy = get_stage_strategy(6)
+
+        assert strategy['stage'] == 6
+        assert strategy['name'] == '상승 변화기2'
+        assert strategy['action'] == 'cover_or_buy'
+        assert strategy['risk_level'] == 'high'
+
+    def test_strategy_with_macd_directions(self):
+        """MACD 방향 정보 포함"""
+        macd_dirs = {'상': 'up', '중': 'up', '하': 'up'}
+
+        strategy = get_stage_strategy(1, macd_directions=macd_dirs)
+
+        # MACD 방향 정보 확인
+        assert 'macd_directions' in strategy
+        assert strategy['macd_directions'] == macd_dirs
+
+        # MACD 일치도 확인
+        assert 'macd_alignment' in strategy
+        alignment = strategy['macd_alignment']
+        assert alignment['up_count'] == 3
+        assert alignment['down_count'] == 0
+        assert alignment['neutral_count'] == 0
+        assert alignment['strength'] == 'strong'
+
+    def test_strategy_with_weak_macd_alignment(self):
+        """약한 MACD 일치도"""
+        macd_dirs = {'상': 'up', '중': 'down', '하': 'neutral'}
+
+        strategy = get_stage_strategy(1, macd_directions=macd_dirs)
+
+        alignment = strategy['macd_alignment']
+        assert alignment['up_count'] == 1
+        assert alignment['down_count'] == 1
+        assert alignment['neutral_count'] == 1
+        assert alignment['strength'] == 'weak'
+
+    def test_strategy_invalid_stage_type(self):
+        """잘못된 스테이지 타입"""
+        with pytest.raises(TypeError, match="stage는 정수여야 합니다"):
+            get_stage_strategy("1")
+
+    def test_strategy_invalid_stage_range(self):
+        """잘못된 스테이지 범위"""
+        with pytest.raises(ValueError, match="stage는 1~6 사이여야 합니다"):
+            get_stage_strategy(0)
+
+        with pytest.raises(ValueError, match="stage는 1~6 사이여야 합니다"):
+            get_stage_strategy(7)

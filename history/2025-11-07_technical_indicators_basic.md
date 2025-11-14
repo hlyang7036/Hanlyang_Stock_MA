@@ -117,7 +117,7 @@ logger.error(f"EMA 계산 중 오류 발생: {e}")
 ---
 
 ### 3. 테스트 코드
-**경로**: `src/tests/test_indicators.py`
+**경로**: `src/tests/analysis/technical/test_indicators.py`
 
 #### 테스트 구조 (19개 테스트)
 
@@ -152,7 +152,7 @@ logger.error(f"EMA 계산 중 오류 발생: {e}")
 
 #### 테스트 결과
 ```bash
-$ pytest src/tests/test_indicators.py -v
+$ pytest src/tests/analysis/technical/test_indicators.py -v
 
 ✅ 19 passed in 0.85s
 ```

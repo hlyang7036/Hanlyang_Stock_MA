@@ -51,7 +51,7 @@ Level 2 공통 모듈 중 4단계인 통합 함수(calculate_all_indicators)를 
 ---
 
 ### 2. 테스트 코드
-**경로**: `src/tests/test_indicators.py`
+**경로**: `src/tests/analysis/technical/test_indicators.py`
 
 #### 추가된 테스트 클래스 (1개, 총 10개 테스트)
 
@@ -68,7 +68,7 @@ Level 2 공통 모듈 중 4단계인 통합 함수(calculate_all_indicators)를 
 
 #### 테스트 결과
 ```bash
-$ pytest src/tests/test_indicators.py -v
+$ pytest src/tests/analysis/technical/test_indicators.py -v
 
 ✅ 69 passed in 1.45s
 
