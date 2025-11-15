@@ -6,8 +6,8 @@
 Modules:
     entry: 진입 신호 생성 (매수/매도)
     exit: 청산 신호 생성 (3단계 시스템)
-    strength: 신호 강도 평가 (향후 구현)
-    filter: 신호 필터링 (향후 구현)
+    strength: 신호 강도 평가 (0-100점 채점)
+    filter: 신호 필터링 (품질 제어)
 """
 
 from src.analysis.signal.entry import (
@@ -24,6 +24,21 @@ from src.analysis.signal.exit import (
     check_macd_cross
 )
 
+from src.analysis.signal.strength import (
+    evaluate_signal_strength,
+    calculate_macd_alignment_score,
+    calculate_trend_strength_score,
+    calculate_momentum_score
+)
+
+from src.analysis.signal.filter import (
+    apply_signal_filters,
+    check_strength_filter,
+    check_volatility_filter,
+    check_trend_filter,
+    check_conflicting_signals
+)
+
 __all__ = [
     # Entry signals
     'generate_buy_signal',
@@ -34,5 +49,16 @@ __all__ = [
     'generate_exit_signal',
     'check_histogram_peakout',
     'check_macd_peakout',
-    'check_macd_cross'
+    'check_macd_cross',
+    # Signal strength
+    'evaluate_signal_strength',
+    'calculate_macd_alignment_score',
+    'calculate_trend_strength_score',
+    'calculate_momentum_score',
+    # Signal filtering
+    'apply_signal_filters',
+    'check_strength_filter',
+    'check_volatility_filter',
+    'check_trend_filter',
+    'check_conflicting_signals'
 ]
