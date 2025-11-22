@@ -314,10 +314,38 @@ def get_stop_loss_price(
     volatility_stop = calculate_volatility_stop(
         entry_price, atr, position_type, atr_multiplier
     )
-    
-    # 4. 최종 손절가 선택
+
+    # 4. 추세 손절가 유효성 검증
+    # 매수 포지션: 추세 손절가는 진입가보다 낮아야 함
+    # 매도 포지션: 추세 손절가는 진입가보다 높아야 함
+    trend_stop_valid = False
+
     if position_type == 'long':
-        # 매수 포지션: 더 높은 손절가 선택 (보수적)
+        if trend_stop < entry_price:
+            trend_stop_valid = True
+        else:
+            logger.warning(
+                f"추세 손절가가 진입가보다 높아 무효 처리: "
+                f"진입가={entry_price:,.0f}원, 추세손절={trend_stop:,.0f}원 "
+                f"(변동성 손절만 사용)"
+            )
+    else:  # short
+        if trend_stop > entry_price:
+            trend_stop_valid = True
+        else:
+            logger.warning(
+                f"추세 손절가가 진입가보다 낮아 무효 처리: "
+                f"진입가={entry_price:,.0f}원, 추세손절={trend_stop:,.0f}원 "
+                f"(변동성 손절만 사용)"
+            )
+
+    # 5. 최종 손절가 선택
+    if not trend_stop_valid:
+        # 추세 손절가가 무효하면 변동성 손절가만 사용
+        final_stop = volatility_stop
+        stop_type = 'volatility'
+    elif position_type == 'long':
+        # 매수 포지션: 더 높은 손절가 선택 (보수적, 현재가에 더 가까움)
         if volatility_stop >= trend_stop:
             final_stop = volatility_stop
             stop_type = 'volatility'
@@ -325,19 +353,19 @@ def get_stop_loss_price(
             final_stop = trend_stop
             stop_type = 'trend'
     else:
-        # 매도 포지션: 더 낮은 손절가 선택 (보수적)
+        # 매도 포지션: 더 낮은 손절가 선택 (보수적, 현재가에 더 가까움)
         if volatility_stop <= trend_stop:
             final_stop = volatility_stop
             stop_type = 'volatility'
         else:
             final_stop = trend_stop
             stop_type = 'trend'
-    
-    # 5. 거리 계산
+
+    # 6. 거리 계산
     distance_won = abs(current_price - final_stop)
     distance_pct = distance_won / current_price
-    
-    # 6. 리스크 금액 (1주당)
+
+    # 7. 리스크 금액 (1주당)
     risk_amount = abs(entry_price - final_stop)
     
     result = {

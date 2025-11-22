@@ -68,6 +68,7 @@ htmlcov/
 data/raw/*
 data/processed/*
 results/
+src/backtest/*
 backtest_results/
 *.csv
 *.xlsx

@@ -354,23 +354,38 @@ class BacktestEngine:
             # 해당 날짜까지의 데이터만 사용
             historical_data = data.iloc[:date_idx + 1]
 
+            # 포지션 정보 가져오기
+            position = self.portfolio.get_position(ticker)
+
             # 청산 신호 생성
-            exit_signals = generate_exit_signal(historical_data)
+            try:
+                exit_signals = generate_exit_signal(
+                    data=historical_data,
+                    position_type=position.position_type,
+                    strategy='sequential'
+                )
+            except ValueError as e:
+                # 필수 컬럼 누락 등의 데이터 문제
+                logger.warning(f"청산 신호 생성 실패 ({ticker}): {e}")
+                continue
+            except Exception as e:
+                logger.error(f"청산 신호 생성 중 오류 ({ticker}): {e}")
+                continue
 
             latest_signal = exit_signals.iloc[-1]
 
             # 청산 신호가 없으면 스킵
-            if latest_signal['Exit_Signal'] == 0:
+            if latest_signal['Exit_Level'] == 0:
                 continue
 
-            # 청산 비율 결정
+            # 청산 비율 결정 (Exit_Ratio는 퍼센트 값: 0, 50, 100)
             exit_ratio = latest_signal['Exit_Ratio']
 
             if exit_ratio == 0:
                 continue
 
             position = self.portfolio.get_position(ticker)
-            shares_to_sell = int(position.shares * exit_ratio)
+            shares_to_sell = int(position.shares * exit_ratio / 100)
 
             if shares_to_sell == 0:
                 continue
@@ -380,7 +395,7 @@ class BacktestEngine:
                 ticker=ticker,
                 action='sell',
                 shares=shares_to_sell,
-                reason=f"exit_signal ({latest_signal['Exit_Type']})"
+                reason=f"exit_signal ({latest_signal['Exit_Signal']})"
             )
 
             # 실행
@@ -469,8 +484,12 @@ class BacktestEngine:
                     'stage': historical_data['Stage'].iloc[-1]
                 })
 
+            except ValueError as e:
+                # 필수 컬럼 누락 등의 데이터 문제
+                logger.debug(f"신호 생성 실패 ({ticker}): {e}")
+                continue
             except Exception as e:
-                logger.debug(f"신호 생성 실패: {ticker} - {e}")
+                logger.debug(f"신호 생성 중 오류 ({ticker}): {e}")
                 continue
 
         if not signals:
@@ -572,11 +591,11 @@ class BacktestEngine:
         # 최대 낙폭 계산
         max_drawdown = self._calculate_max_drawdown()
 
-        # 거래 통계
-        total_trades = len(self.portfolio.closed_positions)
+        # 거래 통계 (trades는 딕셔너리 리스트, 'pnl' 키 포함)
+        total_trades = len(self.portfolio.trades)
         winning_trades = sum(
-            1 for pos in self.portfolio.closed_positions
-            if pos.get('pnl', 0) > 0
+            1 for trade in self.portfolio.trades
+            if trade.get('pnl', 0) > 0
         )
         losing_trades = total_trades - winning_trades
         win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
@@ -665,3 +684,47 @@ class BacktestEngine:
             max_dd = max(max_dd, drawdown)
 
         return max_dd
+
+def main():
+
+    # 1. 엔진 생성
+    engine = BacktestEngine(config={
+        'use_cache': True,
+        'commission_rate': 0.00015,
+        'slippage_pct': 0.001,
+        'enable_early_signals': False,
+        'risk_config': {
+            'risk_per_trade': 0.01,
+            'atr_multiplier': 2.0,
+            'skip_portfolio_limits': True  # 포트폴리오 제한 제외
+        }
+    })
+
+    # 2. 백테스팅 실행
+    result = engine.run_backtest(
+        start_date='2025-06-01',
+        end_date='2025-10-31',
+        initial_capital=100_000_000,
+        market='ALL'  # KOSPI + KOSDAQ 전체
+    )
+
+    # 3. 결과 확인
+    print(result.summary())
+
+    print(f"최종 자본: {result.final_capital:,.0f}원")
+    print(f"총 수익률: {result.total_return:.2f}%")
+    print(f"최대 낙폭: {result.max_drawdown:.2f}%")
+    print(f"승률: {result.win_rate:.2f}%")
+
+    # 4. 거래 내역 확인
+    for trade in result.trades[:5]:  # 첫 5개 거래
+        print(f"{trade['date']}: {trade['ticker']} {trade['action']} "
+              f"손익={trade['pnl']:,.0f}원")
+
+    # 5. 포트폴리오 히스토리 (시각화용)
+    history_df = pd.DataFrame(result.portfolio_history)
+    history_df.set_index('date', inplace=True)
+    print(history_df['equity'].describe())
+
+if __name__ == "__main__":
+    main()
