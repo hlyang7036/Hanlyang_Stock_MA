@@ -331,6 +331,446 @@ class PerformanceAnalyzer:
 
         return total_profit / total_loss
 
+    def calculate_sortino_ratio(
+        self,
+        risk_free_rate: float = 0.03,
+        target_return: float = 0.0
+    ) -> float:
+        """
+        소르티노 비율 계산
+
+        샤프 비율과 달리 하방 변동성(downside deviation)만 고려합니다.
+        손실 위험에 대한 보상을 더 정확하게 측정합니다.
+
+        Args:
+            risk_free_rate: 무위험 수익률 (연율, 기본값: 3%)
+            target_return: 목표 수익률 (연율, 기본값: 0%)
+
+        Returns:
+            float: 소르티노 비율
+
+        Notes:
+            공식: (수익률 - 목표수익률) / 하방편차
+
+            해석:
+            - > 2.0: 매우 우수
+            - 1.0 ~ 2.0: 우수
+            - 0.5 ~ 1.0: 양호
+            - < 0.5: 개선 필요
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> sortino = analyzer.calculate_sortino_ratio()
+            >>> print(f"소르티노 비율: {sortino:.2f}")
+        """
+        if self.history_df.empty or 'daily_return' not in self.history_df.columns:
+            self.calculate_returns()  # 일별 수익률 계산
+
+        if self.history_df.empty:
+            return 0.0
+
+        # 일별 수익률
+        daily_returns = self.history_df['daily_return'].dropna()
+
+        if len(daily_returns) == 0:
+            return 0.0
+
+        # 일별 목표 수익률
+        daily_target = (target_return / 252) * 100
+
+        # 하방 편차 계산 (목표 수익률 미달 수익률만 고려)
+        downside_returns = daily_returns[daily_returns < daily_target]
+
+        if len(downside_returns) == 0:
+            # 모든 수익률이 목표 이상
+            return float('inf') if daily_returns.mean() > daily_target else 0.0
+
+        downside_deviation = downside_returns.std()
+
+        if downside_deviation == 0:
+            return 0.0
+
+        # 일별 무위험 수익률
+        daily_risk_free = (risk_free_rate / 252) * 100
+
+        # 소르티노 비율 (연환산)
+        excess_return = daily_returns.mean() - daily_risk_free
+        sortino_ratio = (excess_return / downside_deviation) * np.sqrt(252)
+
+        return sortino_ratio
+
+    def calculate_calmar_ratio(self) -> float:
+        """
+        칼마 비율 계산
+
+        연환산 수익률 대비 최대 낙폭 비율입니다.
+
+        Returns:
+            float: 칼마 비율
+
+        Notes:
+            공식: CAGR / MDD
+
+            해석:
+            - > 3.0: 매우 우수
+            - 1.0 ~ 3.0: 우수
+            - 0.5 ~ 1.0: 양호
+            - < 0.5: 개선 필요
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> calmar = analyzer.calculate_calmar_ratio()
+            >>> print(f"칼마 비율: {calmar:.2f}")
+        """
+        returns = self.calculate_returns()
+        cagr = returns['cagr']
+
+        mdd_info = self.calculate_max_drawdown()
+        mdd = mdd_info['max_drawdown']
+
+        if mdd == 0:
+            return float('inf') if cagr > 0 else 0.0
+
+        return cagr / mdd
+
+    def calculate_recovery_factor(self) -> float:
+        """
+        회복 팩터 계산
+
+        순이익 대비 최대 낙폭 비율입니다.
+        전략이 MDD에서 얼마나 빠르게 회복하는지 측정합니다.
+
+        Returns:
+            float: 회복 팩터
+
+        Notes:
+            공식: 순이익(원) / 최대낙폭금액(원)
+
+            해석:
+            - 높을수록 손실 대비 수익 회복력이 우수
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> recovery = analyzer.calculate_recovery_factor()
+            >>> print(f"회복 팩터: {recovery:.2f}")
+        """
+        if self.history_df.empty:
+            return 0.0
+
+        # 순이익 (원)
+        final_equity = self.history_df['equity'].iloc[-1]
+        net_profit = final_equity - self.initial_capital
+
+        # MDD 금액 계산
+        mdd_info = self.calculate_max_drawdown()
+        mdd_pct = mdd_info['max_drawdown']
+
+        if mdd_pct == 0:
+            return float('inf') if net_profit > 0 else 0.0
+
+        # MDD를 금액으로 환산
+        equity = self.history_df['equity']
+        cummax = equity.cummax()
+        drawdown_amount = (cummax - equity).max()
+
+        if drawdown_amount == 0:
+            return float('inf') if net_profit > 0 else 0.0
+
+        return net_profit / drawdown_amount
+
+    def calculate_risk_reward_ratio(self) -> float:
+        """
+        위험보상비율 계산
+
+        평균 수익 대비 평균 손실 비율입니다.
+
+        Returns:
+            float: 위험보상비율
+
+        Notes:
+            공식: |평균 수익| / |평균 손실|
+
+            해석:
+            - > 2.0: 우수 (손실 대비 수익이 2배 이상)
+            - 1.5 ~ 2.0: 양호
+            - 1.0 ~ 1.5: 보통
+            - < 1.0: 개선 필요 (손실이 수익보다 큼)
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> rr = analyzer.calculate_risk_reward_ratio()
+            >>> print(f"위험보상비율: {rr:.2f}")
+        """
+        win_rate_info = self.calculate_win_rate()
+        avg_win = win_rate_info['avg_win']
+        avg_loss = win_rate_info['avg_loss']
+
+        if avg_loss == 0:
+            return float('inf') if avg_win > 0 else 0.0
+
+        return abs(avg_win / avg_loss)
+
+    def calculate_expected_value(self) -> float:
+        """
+        기대값 계산
+
+        거래당 기대 수익을 계산합니다.
+
+        Returns:
+            float: 거래당 기대값 (원)
+
+        Notes:
+            공식: (승률 × 평균수익) - (패률 × |평균손실|)
+
+            양수면 장기적으로 수익, 음수면 장기적으로 손실
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> ev = analyzer.calculate_expected_value()
+            >>> print(f"거래당 기대값: {ev:,.0f}원")
+        """
+        win_rate_info = self.calculate_win_rate()
+
+        win_rate = win_rate_info['win_rate'] / 100  # 백분율 -> 비율
+        loss_rate = 1 - win_rate
+        avg_win = win_rate_info['avg_win']
+        avg_loss = abs(win_rate_info['avg_loss'])
+
+        expected_value = (win_rate * avg_win) - (loss_rate * avg_loss)
+
+        return expected_value
+
+    def calculate_consecutive_stats(self) -> Dict[str, Any]:
+        """
+        연속 거래 통계
+
+        연속 승패 패턴을 분석합니다.
+
+        Returns:
+            Dict: 연속 거래 통계
+                - max_consecutive_wins: 최대 연속 수익 거래
+                - max_consecutive_losses: 최대 연속 손실 거래
+                - avg_consecutive_wins: 평균 연속 수익 거래
+                - avg_consecutive_losses: 평균 연속 손실 거래
+
+        Notes:
+            최대 연속 손실은 자금 관리에 매우 중요합니다.
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> stats = analyzer.calculate_consecutive_stats()
+            >>> print(f"최대 연속 손실: {stats['max_consecutive_losses']}회")
+        """
+        if self.trades_df.empty or 'pnl' not in self.trades_df.columns:
+            return {
+                'max_consecutive_wins': 0,
+                'max_consecutive_losses': 0,
+                'avg_consecutive_wins': 0.0,
+                'avg_consecutive_losses': 0.0
+            }
+
+        # 승패 판정 (True: 수익, False: 손실)
+        is_win = self.trades_df['pnl'] > 0
+
+        # 연속 승패 카운트
+        win_streaks = []
+        loss_streaks = []
+
+        current_streak = 0
+        current_type = None
+
+        for win in is_win:
+            if win:
+                if current_type == 'win':
+                    current_streak += 1
+                else:
+                    if current_type == 'loss' and current_streak > 0:
+                        loss_streaks.append(current_streak)
+                    current_streak = 1
+                    current_type = 'win'
+            else:
+                if current_type == 'loss':
+                    current_streak += 1
+                else:
+                    if current_type == 'win' and current_streak > 0:
+                        win_streaks.append(current_streak)
+                    current_streak = 1
+                    current_type = 'loss'
+
+        # 마지막 연속 기록 추가
+        if current_type == 'win' and current_streak > 0:
+            win_streaks.append(current_streak)
+        elif current_type == 'loss' and current_streak > 0:
+            loss_streaks.append(current_streak)
+
+        return {
+            'max_consecutive_wins': max(win_streaks) if win_streaks else 0,
+            'max_consecutive_losses': max(loss_streaks) if loss_streaks else 0,
+            'avg_consecutive_wins': np.mean(win_streaks) if win_streaks else 0.0,
+            'avg_consecutive_losses': np.mean(loss_streaks) if loss_streaks else 0.0
+        }
+
+    def calculate_holding_period(self) -> Dict[str, Any]:
+        """
+        보유 기간 분석
+
+        수익/손실 거래별 평균 보유 기간을 분석합니다.
+
+        Returns:
+            Dict: 보유 기간 통계
+                - avg_holding_days: 평균 보유 일수
+                - min_holding_days: 최소 보유 일수
+                - max_holding_days: 최대 보유 일수
+                - avg_winning_holding_days: 수익 거래 평균 보유 일수
+                - avg_losing_holding_days: 손실 거래 평균 보유 일수
+
+        Notes:
+            수익/손실 거래별 보유 기간 차이 분석
+            "손절은 빠르게, 수익은 길게" 원칙 검증
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> holding = analyzer.calculate_holding_period()
+            >>> print(f"평균 보유: {holding['avg_holding_days']:.1f}일")
+        """
+        if self.trades_df.empty or 'holding_days' not in self.trades_df.columns:
+            return {
+                'avg_holding_days': 0.0,
+                'min_holding_days': 0,
+                'max_holding_days': 0,
+                'avg_winning_holding_days': 0.0,
+                'avg_losing_holding_days': 0.0
+            }
+
+        # 전체 통계
+        avg_holding = self.trades_df['holding_days'].mean()
+        min_holding = self.trades_df['holding_days'].min()
+        max_holding = self.trades_df['holding_days'].max()
+
+        # 수익/손실별 통계
+        winning_trades = self.trades_df[self.trades_df['pnl'] > 0]
+        losing_trades = self.trades_df[self.trades_df['pnl'] < 0]
+
+        avg_winning_holding = winning_trades['holding_days'].mean() if len(winning_trades) > 0 else 0.0
+        avg_losing_holding = losing_trades['holding_days'].mean() if len(losing_trades) > 0 else 0.0
+
+        return {
+            'avg_holding_days': avg_holding,
+            'min_holding_days': min_holding,
+            'max_holding_days': max_holding,
+            'avg_winning_holding_days': avg_winning_holding,
+            'avg_losing_holding_days': avg_losing_holding
+        }
+
+    def analyze_by_exit_reason(self) -> Dict[str, Dict[str, Any]]:
+        """
+        청산 사유별 성과 분석
+
+        손절, 신호청산 등 청산 사유별로 성과를 분석합니다.
+
+        Returns:
+            Dict: 청산 사유별 통계
+                {
+                    'reason_name': {
+                        'count': int,
+                        'total_pnl': float,
+                        'avg_pnl': float,
+                        'win_rate': float
+                    },
+                    ...
+                }
+
+        Notes:
+            손절 vs 신호청산 효과 비교
+            각 청산 방법의 효율성 검증
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> reasons = analyzer.analyze_by_exit_reason()
+            >>> for reason, stats in reasons.items():
+            ...     print(f"{reason}: {stats['count']}건, 평균 {stats['avg_pnl']:,.0f}원")
+        """
+        if self.trades_df.empty or 'reason' not in self.trades_df.columns:
+            return {}
+
+        # 청산 사유별 그룹화
+        result = {}
+
+        for reason in self.trades_df['reason'].unique():
+            reason_trades = self.trades_df[self.trades_df['reason'] == reason]
+
+            count = len(reason_trades)
+            total_pnl = reason_trades['pnl'].sum()
+            avg_pnl = reason_trades['pnl'].mean()
+
+            winning_count = len(reason_trades[reason_trades['pnl'] > 0])
+            win_rate = (winning_count / count * 100) if count > 0 else 0.0
+
+            result[reason] = {
+                'count': count,
+                'total_pnl': total_pnl,
+                'avg_pnl': avg_pnl,
+                'win_rate': win_rate
+            }
+
+        return result
+
+    def analyze_by_entry_stage(self) -> Dict[str, Dict[str, Any]]:
+        """
+        진입 스테이지별 성과 분석
+
+        조기 진입(Stage 5) vs 통상 진입(Stage 6) 효과를 비교합니다.
+
+        Returns:
+            Dict: 스테이지별 통계
+                {
+                    'stage_N': {
+                        'count': int,
+                        'total_pnl': float,
+                        'avg_pnl': float,
+                        'win_rate': float
+                    },
+                    ...
+                }
+
+        Notes:
+            조기진입(Stage 5) vs 통상진입(Stage 6) 효과 비교
+            스테이지별 수익성 검증
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> stages = analyzer.analyze_by_entry_stage()
+            >>> for stage, stats in stages.items():
+            ...     print(f"{stage}: 승률 {stats['win_rate']:.1f}%")
+        """
+        if self.trades_df.empty or 'entry_stage' not in self.trades_df.columns:
+            return {}
+
+        # 스테이지별 그룹화
+        result = {}
+
+        for stage in self.trades_df['entry_stage'].unique():
+            if pd.isna(stage):
+                continue
+
+            stage_trades = self.trades_df[self.trades_df['entry_stage'] == stage]
+
+            count = len(stage_trades)
+            total_pnl = stage_trades['pnl'].sum()
+            avg_pnl = stage_trades['pnl'].mean()
+
+            winning_count = len(stage_trades[stage_trades['pnl'] > 0])
+            win_rate = (winning_count / count * 100) if count > 0 else 0.0
+
+            result[f'stage_{int(stage)}'] = {
+                'count': count,
+                'total_pnl': total_pnl,
+                'avg_pnl': avg_pnl,
+                'win_rate': win_rate
+            }
+
+        return result
+
     def generate_report(self) -> str:
         """
         종합 리포트 생성
@@ -343,11 +783,20 @@ class PerformanceAnalyzer:
             >>> report = analyzer.generate_report()
             >>> print(report)
         """
+        # 기존 지표 계산
         returns = self.calculate_returns()
         sharpe = self.calculate_sharpe_ratio()
         mdd = self.calculate_max_drawdown()
         win_rate = self.calculate_win_rate()
         profit_factor = self.calculate_profit_factor()
+
+        # Phase 1 신규 지표 계산
+        sortino = self.calculate_sortino_ratio()
+        calmar = self.calculate_calmar_ratio()
+        recovery = self.calculate_recovery_factor()
+        risk_reward = self.calculate_risk_reward_ratio()
+        expected_value = self.calculate_expected_value()
+        consecutive = self.calculate_consecutive_stats()
 
         report_lines = [
             "=" * 70,
@@ -364,6 +813,9 @@ class PerformanceAnalyzer:
             "",
             "=== 리스크 지표 ===",
             f"샤프 비율: {sharpe:.2f}",
+            f"소르티노 비율: {sortino:.2f}",
+            f"칼마 비율: {calmar:.2f}",
+            f"회복 팩터: {recovery:.2f}",
             f"최대 낙폭(MDD): {mdd['max_drawdown']:.2f}%",
             f"  - 고점: {mdd['peak_date']}",
             f"  - 저점: {mdd['trough_date']}",
@@ -378,9 +830,52 @@ class PerformanceAnalyzer:
             f"평균 수익: {win_rate['avg_win']:,.0f}원",
             f"평균 손실: {win_rate['avg_loss']:,.0f}원",
             f"손익비(Profit Factor): {profit_factor:.2f}",
+            f"위험보상비율(R/R): {risk_reward:.2f}",
+            f"거래당 기대값: {expected_value:,.0f}원",
             "",
-            "=== 월별 수익률 (최근 12개월) ===",
+            "=== 연속 거래 분석 ===",
+            f"최대 연속 수익: {consecutive['max_consecutive_wins']}회",
+            f"최대 연속 손실: {consecutive['max_consecutive_losses']}회",
+            f"평균 연속 수익: {consecutive['avg_consecutive_wins']:.1f}회",
+            f"평균 연속 손실: {consecutive['avg_consecutive_losses']:.1f}회",
+            "",
         ]
+
+        # Phase 2 분석 추가
+        holding = self.calculate_holding_period()
+        if holding['avg_holding_days'] > 0:
+            report_lines.extend([
+                "=== 보유 기간 분석 ===",
+                f"평균 보유 기간: {holding['avg_holding_days']:.1f}일",
+                f"최소/최대 보유: {holding['min_holding_days']}일 / {holding['max_holding_days']}일",
+                f"수익 거래 평균 보유: {holding['avg_winning_holding_days']:.1f}일",
+                f"손실 거래 평균 보유: {holding['avg_losing_holding_days']:.1f}일",
+                "",
+            ])
+
+        exit_reasons = self.analyze_by_exit_reason()
+        if exit_reasons:
+            report_lines.append("=== 청산 사유별 분석 ===")
+            for reason, stats in exit_reasons.items():
+                report_lines.append(
+                    f"{reason}: {stats['count']}건 "
+                    f"(승률 {stats['win_rate']:.1f}%, "
+                    f"평균 {stats['avg_pnl']:,.0f}원)"
+                )
+            report_lines.append("")
+
+        entry_stages = self.analyze_by_entry_stage()
+        if entry_stages:
+            report_lines.append("=== 진입 스테이지별 분석 ===")
+            for stage, stats in sorted(entry_stages.items()):
+                report_lines.append(
+                    f"{stage}: {stats['count']}건 "
+                    f"(승률 {stats['win_rate']:.1f}%, "
+                    f"평균 {stats['avg_pnl']:,.0f}원)"
+                )
+            report_lines.append("")
+
+        report_lines.append("=== 월별 수익률 (최근 12개월) ===")
 
         # 월별 수익률 (최근 12개월)
         monthly_returns = returns['monthly_returns']

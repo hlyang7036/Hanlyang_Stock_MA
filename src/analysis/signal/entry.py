@@ -376,12 +376,13 @@ def generate_entry_signals(
         result.loc[early_sell_only, 'Signal_Type'] = 'sell'
         result.loc[early_sell_only, 'Signal_Reason'] = early_sell.loc[early_sell_only, 'Signal_Reason']
     
-    # 통계 로깅
+    # 통계 로깅 (신호가 있을 때만 출력)
     buy_count = (result['Entry_Signal'] > 0).sum()
     sell_count = (result['Entry_Signal'] < 0).sum()
-    
-    logger.info(f"진입 신호 생성 완료: 매수 {buy_count}회, 매도 {sell_count}회")
-    
+
+    if buy_count > 0 or sell_count > 0:
+        logger.info(f"진입 신호 생성 완료: 매수 {buy_count}회, 매도 {sell_count}회")
+
     if enable_early:
         normal_buy_count = (result['Entry_Signal'] == 1).sum()
         early_buy_count = (result['Entry_Signal'] == 2).sum()
@@ -391,7 +392,7 @@ def generate_entry_signals(
             f"상세: 통상매수 {normal_buy_count}, 조기매수 {early_buy_count}, "
             f"통상매도 {normal_sell_count}, 조기매도 {early_sell_count}"
         )
-    
+
     logger.debug("통합 진입 신호 생성 완료")
     
     return result

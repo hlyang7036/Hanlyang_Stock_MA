@@ -316,6 +316,7 @@ class BacktestEngine:
             close_result = self.portfolio.close_position(
                 ticker=ticker,
                 exit_price=execution_result['fill_price'],
+                current_date=date,
                 reason=order.reason
             )
 
@@ -408,6 +409,7 @@ class BacktestEngine:
             close_result = self.portfolio.close_position(
                 ticker=ticker,
                 exit_price=execution_result['fill_price'],
+                current_date=date,
                 shares=shares_to_sell,
                 reason=order.reason
             )
@@ -581,24 +583,32 @@ class BacktestEngine:
         Returns:
             BacktestResult: 백테스팅 결과
         """
+        from src.backtest.analytics import PerformanceAnalyzer
+
         # 최종 자본
         final_equity = self.portfolio.calculate_equity({})
 
-        # 총 수익률
-        total_return = ((final_equity - self.portfolio.initial_capital) /
-                       self.portfolio.initial_capital) * 100
-
-        # 최대 낙폭 계산
-        max_drawdown = self._calculate_max_drawdown()
-
-        # 거래 통계 (trades는 딕셔너리 리스트, 'pnl' 키 포함)
-        total_trades = len(self.portfolio.trades)
-        winning_trades = sum(
-            1 for trade in self.portfolio.trades
-            if trade.get('pnl', 0) > 0
+        # analytics.py를 사용하여 통계 계산
+        analyzer = PerformanceAnalyzer(
+            portfolio_history=self.portfolio.history,
+            trades=self.portfolio.trades,
+            initial_capital=self.portfolio.initial_capital
         )
-        losing_trades = total_trades - winning_trades
-        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+
+        # 수익률 지표
+        returns = analyzer.calculate_returns()
+        total_return = returns['total_return']
+
+        # MDD 계산
+        mdd_info = analyzer.calculate_max_drawdown()
+        max_drawdown = mdd_info['max_drawdown']
+
+        # 거래 통계
+        win_rate_info = analyzer.calculate_win_rate()
+        total_trades = win_rate_info['total_trades']
+        winning_trades = win_rate_info['winning_trades']
+        losing_trades = win_rate_info['losing_trades']
+        win_rate = win_rate_info['win_rate']
 
         return BacktestResult(
             start_date=start_date,
@@ -656,36 +666,9 @@ class BacktestEngine:
 
         return prices
 
-    def _calculate_max_drawdown(self) -> float:
-        """
-        최대 낙폭 계산
-
-        Returns:
-            float: 최대 낙폭 (%)
-        """
-        if not self.portfolio.history:
-            return 0.0
-
-        # 자산 가치 추출
-        equity_values = [snapshot['equity'] for snapshot in self.portfolio.history]
-
-        if not equity_values:
-            return 0.0
-
-        # 누적 최고점 추적
-        peak = equity_values[0]
-        max_dd = 0.0
-
-        for value in equity_values:
-            if value > peak:
-                peak = value
-
-            drawdown = (peak - value) / peak * 100
-            max_dd = max(max_dd, drawdown)
-
-        return max_dd
 
 def main():
+    from src.backtest.analytics import PerformanceAnalyzer
 
     # 1. 엔진 생성
     engine = BacktestEngine(config={
@@ -704,11 +687,11 @@ def main():
     result = engine.run_backtest(
         start_date='2025-06-01',
         end_date='2025-10-31',
-        initial_capital=100_000_000,
+        initial_capital=10_000_000,
         market='ALL'  # KOSPI + KOSDAQ 전체
     )
 
-    # 3. 결과 확인
+    # 3. 결과 확인 (기본 요약)
     print(result.summary())
 
     print(f"최종 자본: {result.final_capital:,.0f}원")
@@ -716,15 +699,34 @@ def main():
     print(f"최대 낙폭: {result.max_drawdown:.2f}%")
     print(f"승률: {result.win_rate:.2f}%")
 
-    # 4. 거래 내역 확인
-    for trade in result.trades[:5]:  # 첫 5개 거래
+    # 4. 거래 내역 상세 확인 (수익 순)
+    print("\n=== 거래 내역 상세 (수익 상위 50건) ===")
+    # 수익 순으로 정렬
+    sorted_trades = sorted(result.trades, key=lambda x: x['pnl'], reverse=True)
+    for trade in sorted_trades[:50]:  # 수익 상위 50개
         print(f"{trade['date']}: {trade['ticker']} {trade['action']} "
-              f"손익={trade['pnl']:,.0f}원")
+              f"손익={trade['pnl']:,.0f}원 "
+              f"보유={trade.get('holding_days', 'N/A')}일 "
+              f"사유={trade.get('reason', 'N/A')}")
 
     # 5. 포트폴리오 히스토리 (시각화용)
     history_df = pd.DataFrame(result.portfolio_history)
     history_df.set_index('date', inplace=True)
     print(history_df['equity'].describe())
+
+    # 6. PerformanceAnalyzer를 사용한 상세 분석
+    print("\n" + "=" * 70)
+    print("PerformanceAnalyzer를 사용한 상세 분석")
+    print("=" * 70 + "\n")
+
+    analyzer = PerformanceAnalyzer(
+        portfolio_history=result.portfolio_history,
+        trades=result.trades,
+        initial_capital=result.initial_capital
+    )
+
+    # 확장된 리포트 출력
+    print(analyzer.generate_report())
 
 if __name__ == "__main__":
     main()

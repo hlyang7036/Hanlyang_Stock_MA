@@ -229,6 +229,7 @@ class Portfolio:
         self,
         ticker: str,
         exit_price: float,
+        current_date: datetime,
         shares: int = None,
         reason: str = None
     ) -> Dict[str, Any]:
@@ -238,6 +239,7 @@ class Portfolio:
         Args:
             ticker: 종목코드
             exit_price: 청산가
+            current_date: 청산 날짜 (백테스팅용)
             shares: 청산 주식 수 (None이면 전체 청산)
             reason: 청산 사유 ('stop_loss', 'exit_signal', 'stage_change' 등)
 
@@ -277,8 +279,14 @@ class Portfolio:
         commission = proceeds * self.commission_rate
         self.cash += (proceeds - commission)
 
-        # 보유 기간 계산
-        holding_days = (datetime.now() - position.entry_date).days
+        # 보유 기간 계산 (백테스팅용 current_date 사용)
+        holding_days = (current_date - position.entry_date).days
+
+        # 청산 사유 분류 개선: 손절인데 수익이면 trailing_stop으로 재분류
+        final_reason = reason
+        if reason and 'stop_loss' in reason and pnl > 0:
+            # 손절가에 도달했는데 수익이 나는 경우 = 트레일링 스톱
+            final_reason = f'trailing_stop ({reason.split("(")[1].rstrip(")")})'
 
         # 포지션 업데이트 또는 제거
         if shares == position.shares:
@@ -289,7 +297,7 @@ class Portfolio:
                 f"포지션 청산: {ticker} "
                 f"{shares}주 @ {exit_price:,.0f}원 "
                 f"손익={pnl:,.0f}원 ({return_pct:+.2f}%) "
-                f"사유={reason}"
+                f"사유={final_reason}"
             )
         else:
             # 부분 청산
@@ -305,9 +313,9 @@ class Portfolio:
                 f"손익={pnl:,.0f}원 ({return_pct:+.2f}%)"
             )
 
-        # 거래 기록
+        # 거래 기록 (백테스팅용 current_date 사용)
         trade_result = {
-            'date': datetime.now(),
+            'date': current_date,
             'ticker': ticker,
             'action': 'sell',
             'shares': shares,
@@ -316,8 +324,9 @@ class Portfolio:
             'pnl': pnl,
             'return_pct': return_pct,
             'holding_days': holding_days,
-            'reason': reason,
-            'commission': commission
+            'reason': final_reason,  # 개선된 청산 사유
+            'commission': commission,
+            'entry_stage': position.stage_at_entry  # 진입 시 스테이지 추가
         }
 
         self.record_trade(trade_result)
