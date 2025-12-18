@@ -728,5 +728,97 @@ def main():
     # 확장된 리포트 출력
     print(analyzer.generate_report())
 
+    # 7. Stage 6 실패 패턴 분석
+    print("\n" + "=" * 70)
+    print("Stage 6 실패 패턴 분석")
+    print("=" * 70 + "\n")
+
+    stage6_analysis = analyzer.analyze_stage6_failures()
+
+    if stage6_analysis['total_count'] > 0:
+        print(f"Stage 6 진입 총 {stage6_analysis['total_count']}건")
+        print(f"  - 수익 거래: {stage6_analysis['win_count']}건")
+        print(f"  - 손실 거래: {stage6_analysis['loss_count']}건")
+        print(f"  - 승률: {stage6_analysis['win_rate']:.1f}%")
+        print(f"  - 평균 손익: {stage6_analysis['avg_pnl']:,.0f}원")
+        print(f"  - 평균 수익: {stage6_analysis['avg_win']:,.0f}원")
+        print(f"  - 평균 손실: {stage6_analysis['avg_loss']:,.0f}원")
+
+        print("\n=== 청산 사유별 분포 ===")
+        for reason, stats in stage6_analysis['exit_reason_dist'].items():
+            print(f"{reason}: {stats['count']}건 (승률 {stats['win_rate']:.1f}%, 평균 {stats['avg_pnl']:,.0f}원)")
+
+        print("\n=== 보유 기간 통계 ===")
+        hp = stage6_analysis['holding_period_stats']
+        print(f"전체 평균 보유: {hp['avg_holding_all']:.1f}일")
+        print(f"수익 거래 평균 보유: {hp['avg_holding_winners']:.1f}일")
+        print(f"손실 거래 평균 보유: {hp['avg_holding_losers']:.1f}일")
+        print(f"보유 기간 범위: {hp['min_holding']:.0f}일 ~ {hp['max_holding']:.0f}일")
+
+        if stage6_analysis['signal_strength_comparison']:
+            print("\n=== 신호 강도 비교 (수익 vs 손실) ===")
+            ss = stage6_analysis['signal_strength_comparison']
+            print(f"수익 거래 평균 강도: {ss['winners_avg_strength']:.2f} (범위: {ss['winners_min']:.0f} ~ {ss['winners_max']:.0f})")
+            print(f"손실 거래 평균 강도: {ss['losers_avg_strength']:.2f} (범위: {ss['losers_min']:.0f} ~ {ss['losers_max']:.0f})")
+            print(f"강도 차이: {ss['strength_diff']:.2f}")
+    else:
+        print("Stage 6 진입 거래가 없습니다.")
+
+    # 8. Stage 3 성공 패턴 분석
+    print("\n" + "=" * 70)
+    print("Stage 3 성공 패턴 분석")
+    print("=" * 70 + "\n")
+
+    stage3_analysis = analyzer.analyze_stage3_success()
+
+    if stage3_analysis['total_count'] > 0:
+        print(f"Stage 3 진입 총 {stage3_analysis['total_count']}건")
+        print(f"  - 수익 거래: {stage3_analysis['win_count']}건")
+        print(f"  - 손실 거래: {stage3_analysis['loss_count']}건")
+        print(f"  - 승률: {stage3_analysis['win_rate']:.1f}%")
+        print(f"  - 평균 손익: {stage3_analysis['avg_pnl']:,.0f}원")
+        print(f"  - 평균 수익: {stage3_analysis['avg_win']:,.0f}원")
+        print(f"  - 평균 손실: {stage3_analysis['avg_loss']:,.0f}원")
+
+        print("\n=== 청산 사유별 분포 ===")
+        for reason, stats in stage3_analysis['exit_reason_dist'].items():
+            print(f"{reason}: {stats['count']}건 (승률 {stats['win_rate']:.1f}%, 평균 {stats['avg_pnl']:,.0f}원)")
+
+        print("\n=== 보유 기간 통계 ===")
+        hp = stage3_analysis['holding_period_stats']
+        print(f"전체 평균 보유: {hp['avg_holding_all']:.1f}일")
+        print(f"수익 거래 평균 보유: {hp['avg_holding_winners']:.1f}일")
+        print(f"손실 거래 평균 보유: {hp['avg_holding_losers']:.1f}일")
+        print(f"보유 기간 범위: {hp['min_holding']:.0f}일 ~ {hp['max_holding']:.0f}일")
+
+        print("\n=== 수익 분포 ===")
+        pnl = stage3_analysis['pnl_distribution']
+        print(f"최대 수익: {pnl['max_profit']:,.0f}원")
+        print(f"중간값: {pnl['median_profit']:,.0f}원")
+        print(f"최소 수익: {pnl['min_profit']:,.0f}원")
+        print(f"표준편차: {pnl['std_profit']:,.0f}원")
+
+        if stage3_analysis['signal_strength_stats']:
+            print("\n=== 신호 강도 통계 ===")
+            ss = stage3_analysis['signal_strength_stats']
+            print(f"평균 신호 강도: {ss['avg_strength']:.2f}")
+            print(f"중간값: {ss['median_strength']:.2f}")
+            print(f"범위: {ss['min_strength']:.0f} ~ {ss['max_strength']:.0f}")
+            print(f"표준편차: {ss['std_strength']:.2f}")
+    else:
+        print("Stage 3 진입 거래가 없습니다.")
+
+    # 9. Stage × Exit Reason 교차 분석
+    print("\n" + "=" * 70)
+    print("진입 스테이지 × 청산 사유 교차 분석")
+    print("=" * 70 + "\n")
+
+    cross_table = analyzer.analyze_stage_exit_cross()
+    if not cross_table.empty:
+        print(cross_table)
+        print("\n※ 상단: 건수(count), 하단: 평균 손익(mean)")
+    else:
+        print("교차 분석할 거래 내역이 없습니다.")
+
 if __name__ == "__main__":
     main()

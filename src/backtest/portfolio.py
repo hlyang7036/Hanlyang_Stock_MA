@@ -326,7 +326,9 @@ class Portfolio:
             'holding_days': holding_days,
             'reason': final_reason,  # 개선된 청산 사유
             'commission': commission,
-            'entry_stage': position.stage_at_entry  # 진입 시 스테이지 추가
+            'entry_stage': position.stage_at_entry,  # 진입 시 스테이지
+            'signal_strength': position.signal_strength,  # 신호 강도
+            'units': position.units  # 포지션 유닛
         }
 
         self.record_trade(trade_result)

@@ -983,3 +983,250 @@ class PerformanceAnalyzer:
 
         self.trades_df.to_csv(filepath, index=False, encoding='utf-8-sig')
         logger.info(f"거래 내역 저장: {filepath} ({len(self.trades_df)}건)")
+
+    def analyze_stage6_failures(self) -> Dict[str, Any]:
+        """
+        Stage 6 진입 실패 패턴 분석
+
+        Stage 6은 "상승 변화기2 (강세 가속)"로 상승장 입구이지만,
+        실제로는 가짜 신호가 많아 승률이 낮을 수 있습니다.
+        이 함수는 Stage 6 진입의 실패 패턴을 분석합니다.
+
+        분석 항목:
+        1. Stage 6 진입 종목의 청산 사유별 분포
+        2. Stage 6에서 수익/손실 종목의 신호 강도 차이
+        3. Stage 6에서 보유 기간 패턴
+        4. 승자와 패자의 특징 비교
+
+        Returns:
+            Dict[str, Any]: 분석 결과
+                - total_count: 총 거래 건수
+                - win_rate: 승률 (%)
+                - avg_pnl: 평균 손익
+                - exit_reason_dist: 청산 사유별 통계 (건수, 평균 손익, 승률)
+                - signal_strength_comparison: 신호 강도 비교 (승자 vs 패자)
+                - holding_period_stats: 보유 기간 통계
+                - stage6_trades: Stage 6 진입 거래 DataFrame
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> stage6_result = analyzer.analyze_stage6_failures()
+            >>> print(f"Stage 6 승률: {stage6_result['win_rate']:.1f}%")
+        """
+        if self.trades_df.empty:
+            return {
+                'total_count': 0,
+                'win_rate': 0.0,
+                'message': '거래 내역이 없습니다.'
+            }
+
+        # Stage 6 진입 거래 필터링
+        stage6_trades = self.trades_df[self.trades_df['entry_stage'] == 6].copy()
+
+        if stage6_trades.empty:
+            return {
+                'total_count': 0,
+                'win_rate': 0.0,
+                'message': 'Stage 6 진입 거래가 없습니다.'
+            }
+
+        # 기본 통계
+        total_count = len(stage6_trades)
+        winners = stage6_trades[stage6_trades['pnl'] > 0]
+        losers = stage6_trades[stage6_trades['pnl'] <= 0]
+        win_rate = len(winners) / total_count * 100
+        avg_pnl = stage6_trades['pnl'].mean()
+
+        # 청산 사유별 분포
+        exit_reason_dist = {}
+        for reason in stage6_trades['reason'].unique():
+            reason_trades = stage6_trades[stage6_trades['reason'] == reason]
+            exit_reason_dist[reason] = {
+                'count': len(reason_trades),
+                'avg_pnl': reason_trades['pnl'].mean(),
+                'win_rate': (reason_trades['pnl'] > 0).sum() / len(reason_trades) * 100
+            }
+
+        # 신호 강도 비교 (signal_strength 필드가 있는 경우)
+        signal_strength_comparison = None
+        if 'signal_strength' in stage6_trades.columns:
+            if not winners.empty and not losers.empty:
+                signal_strength_comparison = {
+                    'winners_avg_strength': winners['signal_strength'].mean(),
+                    'losers_avg_strength': losers['signal_strength'].mean(),
+                    'strength_diff': winners['signal_strength'].mean() - losers['signal_strength'].mean(),
+                    'winners_min': winners['signal_strength'].min(),
+                    'winners_max': winners['signal_strength'].max(),
+                    'losers_min': losers['signal_strength'].min(),
+                    'losers_max': losers['signal_strength'].max()
+                }
+
+        # 보유 기간 패턴
+        holding_period_stats = {
+            'avg_holding_all': stage6_trades['holding_days'].mean(),
+            'avg_holding_winners': winners['holding_days'].mean() if not winners.empty else 0,
+            'avg_holding_losers': losers['holding_days'].mean() if not losers.empty else 0,
+            'median_holding_all': stage6_trades['holding_days'].median(),
+            'max_holding': stage6_trades['holding_days'].max(),
+            'min_holding': stage6_trades['holding_days'].min()
+        }
+
+        return {
+            'total_count': total_count,
+            'win_count': len(winners),
+            'loss_count': len(losers),
+            'win_rate': win_rate,
+            'avg_pnl': avg_pnl,
+            'avg_win': winners['pnl'].mean() if not winners.empty else 0,
+            'avg_loss': losers['pnl'].mean() if not losers.empty else 0,
+            'exit_reason_dist': exit_reason_dist,
+            'signal_strength_comparison': signal_strength_comparison,
+            'holding_period_stats': holding_period_stats,
+            'stage6_trades': stage6_trades
+        }
+
+    def analyze_stage3_success(self) -> Dict[str, Any]:
+        """
+        Stage 3 진입 성공 패턴 분석
+
+        Stage 3은 "하락 변화기2 (약세 가속)"로 일반적으로 매수 청산 시점이지만,
+        역발상 매수 시 바닥 반등을 잡을 수 있습니다.
+        이 함수는 Stage 3 진입의 성공 패턴을 분석합니다.
+
+        분석 항목:
+        1. Stage 3 진입 종목의 청산 사유별 분포
+        2. Stage 3에서 큰 수익이 발생하는 이유
+        3. 보유 기간 패턴
+        4. 신호 강도 분석
+
+        Returns:
+            Dict[str, Any]: 분석 결과
+                - total_count: 총 거래 건수
+                - win_rate: 승률 (%)
+                - avg_pnl: 평균 손익
+                - exit_reason_dist: 청산 사유별 통계
+                - signal_strength_stats: 신호 강도 통계
+                - holding_period_stats: 보유 기간 통계
+                - stage3_trades: Stage 3 진입 거래 DataFrame
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> stage3_result = analyzer.analyze_stage3_success()
+            >>> print(f"Stage 3 평균 수익: {stage3_result['avg_pnl']:,.0f}원")
+        """
+        if self.trades_df.empty:
+            return {
+                'total_count': 0,
+                'win_rate': 0.0,
+                'message': '거래 내역이 없습니다.'
+            }
+
+        # Stage 3 진입 거래 필터링
+        stage3_trades = self.trades_df[self.trades_df['entry_stage'] == 3].copy()
+
+        if stage3_trades.empty:
+            return {
+                'total_count': 0,
+                'win_rate': 0.0,
+                'message': 'Stage 3 진입 거래가 없습니다.'
+            }
+
+        # 기본 통계
+        total_count = len(stage3_trades)
+        winners = stage3_trades[stage3_trades['pnl'] > 0]
+        losers = stage3_trades[stage3_trades['pnl'] <= 0]
+        win_rate = len(winners) / total_count * 100
+        avg_pnl = stage3_trades['pnl'].mean()
+
+        # 청산 사유별 분포
+        exit_reason_dist = {}
+        for reason in stage3_trades['reason'].unique():
+            reason_trades = stage3_trades[stage3_trades['reason'] == reason]
+            exit_reason_dist[reason] = {
+                'count': len(reason_trades),
+                'avg_pnl': reason_trades['pnl'].mean(),
+                'win_rate': (reason_trades['pnl'] > 0).sum() / len(reason_trades) * 100
+            }
+
+        # 신호 강도 분석 (signal_strength 필드가 있는 경우)
+        signal_strength_stats = None
+        if 'signal_strength' in stage3_trades.columns:
+            signal_strength_stats = {
+                'avg_strength': stage3_trades['signal_strength'].mean(),
+                'median_strength': stage3_trades['signal_strength'].median(),
+                'min_strength': stage3_trades['signal_strength'].min(),
+                'max_strength': stage3_trades['signal_strength'].max(),
+                'std_strength': stage3_trades['signal_strength'].std()
+            }
+
+        # 보유 기간 패턴
+        holding_period_stats = {
+            'avg_holding_all': stage3_trades['holding_days'].mean(),
+            'avg_holding_winners': winners['holding_days'].mean() if not winners.empty else 0,
+            'avg_holding_losers': losers['holding_days'].mean() if not losers.empty else 0,
+            'median_holding_all': stage3_trades['holding_days'].median(),
+            'max_holding': stage3_trades['holding_days'].max(),
+            'min_holding': stage3_trades['holding_days'].min()
+        }
+
+        # 수익 분포 분석
+        pnl_distribution = {
+            'max_profit': stage3_trades['pnl'].max(),
+            'min_profit': stage3_trades['pnl'].min(),
+            'median_profit': stage3_trades['pnl'].median(),
+            'std_profit': stage3_trades['pnl'].std()
+        }
+
+        return {
+            'total_count': total_count,
+            'win_count': len(winners),
+            'loss_count': len(losers),
+            'win_rate': win_rate,
+            'avg_pnl': avg_pnl,
+            'avg_win': winners['pnl'].mean() if not winners.empty else 0,
+            'avg_loss': losers['pnl'].mean() if not losers.empty else 0,
+            'exit_reason_dist': exit_reason_dist,
+            'signal_strength_stats': signal_strength_stats,
+            'holding_period_stats': holding_period_stats,
+            'pnl_distribution': pnl_distribution,
+            'stage3_trades': stage3_trades
+        }
+
+    def analyze_stage_exit_cross(self) -> pd.DataFrame:
+        """
+        진입 스테이지 × 청산 사유 교차 분석
+
+        각 스테이지에서 진입한 거래들이 어떤 청산 사유로 끝나는지를
+        교차 분석하여 패턴을 파악합니다.
+
+        Returns:
+            pd.DataFrame: 교차 분석 결과 (MultiIndex DataFrame)
+                - Index: entry_stage
+                - Columns: reason (청산 사유)
+                - Values: count (건수), mean (평균 손익)
+
+        Notes:
+            - Stage 3 진입은 대부분 trailing_stop으로 수익 실현
+            - Stage 6 진입은 stop_loss로 손실이 많이 발생
+            이런 패턴을 확인할 수 있습니다.
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> cross_table = analyzer.analyze_stage_exit_cross()
+            >>> print(cross_table)
+        """
+        if self.trades_df.empty:
+            logger.warning("거래 내역이 없습니다.")
+            return pd.DataFrame()
+
+        # 교차 분석: entry_stage × reason
+        cross_table = pd.crosstab(
+            self.trades_df['entry_stage'],
+            self.trades_df['reason'],
+            values=self.trades_df['pnl'],
+            aggfunc=['count', 'mean'],
+            margins=True,  # 합계 행/열 추가
+            margins_name='Total'
+        )
+
+        return cross_table
