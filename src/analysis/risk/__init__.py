@@ -350,7 +350,8 @@ def apply_risk_management(
             current_price=current_price,
             atr=atr,
             trend_stop=trend_stop,
-            position_type=position_type
+            position_type=position_type,
+            atr_multiplier=cfg['atr_multiplier']
         )
         
         stop_price = stop_info['stop_price']

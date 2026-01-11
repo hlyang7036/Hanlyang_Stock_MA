@@ -31,6 +31,7 @@ class Position:
         lowest_price: 진입 후 최저가 (매도 포지션)
         signal_strength: 진입 시 신호 강도
         stage_at_entry: 진입 시 스테이지
+        entry_strategy: 진입 전략 ('normal_buy', 'early_buy', 'contrarian_buy', 'early_contrarian_buy')
     """
     ticker: str
     position_type: str  # 'long' or 'short'
@@ -44,6 +45,7 @@ class Position:
     lowest_price: Optional[float] = None
     signal_strength: int = 0
     stage_at_entry: int = 0
+    entry_strategy: str = 'normal_buy'  # 'normal_buy', 'early_buy', 'contrarian_buy', 'early_contrarian_buy'
 
     def __post_init__(self):
         """초기화 후 검증"""
@@ -327,6 +329,7 @@ class Portfolio:
             'reason': final_reason,  # 개선된 청산 사유
             'commission': commission,
             'entry_stage': position.stage_at_entry,  # 진입 시 스테이지
+            'entry_strategy': position.entry_strategy,  # 진입 전략
             'signal_strength': position.signal_strength,  # 신호 강도
             'units': position.units  # 포지션 유닛
         }

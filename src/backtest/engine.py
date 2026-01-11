@@ -538,6 +538,24 @@ class BacktestEngine:
                 )
 
                 # 4. 포트폴리오에 포지션 추가
+                # 진입 전략 결정
+                if signal['signal_type'] == 'sell':
+                    # 역발상 매수 (Stage 2 or 3)
+                    if signal['stage'] == 3:
+                        entry_strategy = 'contrarian_buy'
+                    elif signal['stage'] == 2:
+                        entry_strategy = 'early_contrarian_buy'
+                    else:
+                        entry_strategy = 'contrarian_buy'  # 기본값
+                else:
+                    # 일반 매수 (Stage 5 or 6)
+                    if signal['stage'] == 6:
+                        entry_strategy = 'normal_buy'
+                    elif signal['stage'] == 5:
+                        entry_strategy = 'early_buy'
+                    else:
+                        entry_strategy = 'normal_buy'  # 기본값
+
                 position = Position(
                     ticker=ticker,
                     position_type='long',
@@ -548,7 +566,8 @@ class BacktestEngine:
                     stop_price=risk_result['stop_price'],
                     stop_type=risk_result['stop_type'],
                     signal_strength=signal['signal_strength'],
-                    stage_at_entry=signal['stage']
+                    stage_at_entry=signal['stage'],
+                    entry_strategy=entry_strategy
                 )
 
                 self.portfolio.add_position(
@@ -685,7 +704,7 @@ def main():
 
     # 2. 백테스팅 실행
     result = engine.run_backtest(
-        start_date='2025-06-01',
+        start_date='2025-05-01',
         end_date='2025-10-31',
         initial_capital=10_000_000,
         market='ALL'  # KOSPI + KOSDAQ 전체

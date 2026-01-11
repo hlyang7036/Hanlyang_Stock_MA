@@ -771,6 +771,70 @@ class PerformanceAnalyzer:
 
         return result
 
+    def analyze_by_entry_strategy(self) -> Dict[str, Dict[str, Any]]:
+        """
+        진입 전략별 성과 분석
+
+        역발상 매수 vs 일반 매수 등 전략별 효과를 비교합니다.
+
+        Returns:
+            Dict: 전략별 통계
+                {
+                    'contrarian_buy': {
+                        'count': int,
+                        'total_pnl': float,
+                        'avg_pnl': float,
+                        'win_rate': float,
+                        'avg_holding_days': float
+                    },
+                    'normal_buy': {...},
+                    'early_buy': {...},
+                    'early_contrarian_buy': {...}
+                }
+
+        Notes:
+            - contrarian_buy: 역발상 매수 (Stage 3)
+            - early_contrarian_buy: 조기 역발상 매수 (Stage 2)
+            - normal_buy: 일반 매수 (Stage 6)
+            - early_buy: 조기 매수 (Stage 5)
+
+        Examples:
+            >>> analyzer = PerformanceAnalyzer(history, trades, 10_000_000)
+            >>> strategies = analyzer.analyze_by_entry_strategy()
+            >>> for strategy, stats in strategies.items():
+            ...     print(f"{strategy}: 승률 {stats['win_rate']:.1f}%")
+        """
+        if self.trades_df.empty or 'entry_strategy' not in self.trades_df.columns:
+            return {}
+
+        # 전략별 그룹화
+        result = {}
+
+        for strategy in self.trades_df['entry_strategy'].unique():
+            if pd.isna(strategy):
+                continue
+
+            strategy_trades = self.trades_df[self.trades_df['entry_strategy'] == strategy]
+
+            count = len(strategy_trades)
+            total_pnl = strategy_trades['pnl'].sum()
+            avg_pnl = strategy_trades['pnl'].mean()
+
+            winning_count = len(strategy_trades[strategy_trades['pnl'] > 0])
+            win_rate = (winning_count / count * 100) if count > 0 else 0.0
+
+            avg_holding = strategy_trades['holding_days'].mean() if 'holding_days' in strategy_trades.columns else 0.0
+
+            result[strategy] = {
+                'count': count,
+                'total_pnl': total_pnl,
+                'avg_pnl': avg_pnl,
+                'win_rate': win_rate,
+                'avg_holding_days': avg_holding
+            }
+
+        return result
+
     def generate_report(self) -> str:
         """
         종합 리포트 생성
@@ -872,6 +936,18 @@ class PerformanceAnalyzer:
                     f"{stage}: {stats['count']}건 "
                     f"(승률 {stats['win_rate']:.1f}%, "
                     f"평균 {stats['avg_pnl']:,.0f}원)"
+                )
+            report_lines.append("")
+
+        entry_strategies = self.analyze_by_entry_strategy()
+        if entry_strategies:
+            report_lines.append("=== 진입 전략별 분석 ===")
+            for strategy, stats in sorted(entry_strategies.items()):
+                report_lines.append(
+                    f"{strategy}: {stats['count']}건 "
+                    f"(승률 {stats['win_rate']:.1f}%, "
+                    f"평균 {stats['avg_pnl']:,.0f}원, "
+                    f"평균 보유 {stats['avg_holding_days']:.1f}일)"
                 )
             report_lines.append("")
 
