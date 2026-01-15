@@ -7,7 +7,7 @@
 
 import pandas as pd
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
 
@@ -179,7 +179,7 @@ class BacktestEngine:
             >>> result = engine.run_backtest(
             ...     start_date='2020-01-01',
             ...     end_date='2023-12-31',
-            ...     initial_capital=100_000_000,
+            ...     initial_capital=10_000_000,
             ...     market='ALL'
             ... )
             >>> print(result.summary())
@@ -187,14 +187,22 @@ class BacktestEngine:
         logger.info("=" * 60)
         logger.info("백테스팅 시작")
         logger.info("=" * 60)
-        logger.info(f"기간: {start_date} ~ {end_date}")
+        logger.info(f"백테스팅 기간: {start_date} ~ {end_date}")
         logger.info(f"시장: {market}")
         logger.info(f"초기 자본: {initial_capital:,.0f}원")
 
-        # 1. 전체 시장 데이터 로드
+        # MACD 계산을 위한 lookback period 추가
+        LOOKBACK_DAYS = 60  # MACD(중): 5|40|9 → 최소 49일 + 여유 10일
+
+        start_date_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        data_start_date = (start_date_dt - timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+
+        logger.info(f"데이터 수집 기간: {data_start_date} ~ {end_date} (lookback {LOOKBACK_DAYS}일 포함)")
+
+        # 1. 전체 시장 데이터 로드 (lookback period 포함)
         logger.info("시장 데이터 로딩 중...")
         self.market_data = self.data_manager.load_market_data(
-            start_date=start_date,
+            start_date=data_start_date,  # lookback 포함한 시작일
             end_date=end_date,
             market=market
         )
@@ -207,16 +215,20 @@ class BacktestEngine:
             commission_rate=self.config.get('commission_rate', 0.00015)
         )
 
-        # 3. 날짜 리스트 생성 (모든 종목 데이터의 교집합)
-        dates = self._get_common_dates()
-        logger.info(f"거래일 수: {len(dates)}일")
+        # 3. 백테스팅 날짜 리스트 생성 (원래 start_date부터)
+        all_dates = self._get_common_dates()
+
+        # 백테스팅은 원래 start_date부터 시작
+        trading_dates = [d for d in all_dates if d >= start_date_dt]
+
+        logger.info(f"실제 거래일 수: {len(trading_dates)}일 (lookback 제외)")
 
         # 4. 날짜별 루프
-        for i, date in enumerate(dates):
+        for i, date in enumerate(trading_dates):
             self.current_date = date
 
             if i % 10 == 0:  # 매 10일마다 진행 상황 로깅
-                logger.info(f"진행: {i}/{len(dates)} ({date.strftime('%Y-%m-%d')})")
+                logger.info(f"진행: {i}/{len(trading_dates)} ({date.strftime('%Y-%m-%d')})")
 
             self.process_day(date)
 
